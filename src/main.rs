@@ -1,7 +1,7 @@
 extern crate tokio;
-use hyper::{Client, StatusCode, Uri};
+use reqwest::{self, StatusCode};
 use serde::Deserialize;
-use std::{error::Error, fs, time::Duration};
+use std::{collections::HashMap, error::Error, fs, hash::Hash, time::Duration};
 use teloxide::{prelude::*, types::ChatId};
 use tokio::time::sleep;
 use tracing::{error, info};
@@ -22,7 +22,7 @@ struct Config {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+async fn main() -> anyhow::Result<()> {
     if std::env::var(CONFIG_ENV).is_err() {
         std::env::set_var(CONFIG_ENV, CONFIG_VAL);
     }
@@ -43,30 +43,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let bot = Bot::new(config.telegram_token.clone());
 
-    let https = hyper_rustls::HttpsConnectorBuilder::new()
-        .with_native_roots()
-        .https_or_http()
-        .enable_http1()
-        .build();
-
-    let client = Client::builder().build::<_, hyper::Body>(https);
-
     let mut handles = vec![];
 
     for u in &config.addresses {
         let bot = bot.clone();
-        let client = client.clone();
         let config = config.clone();
         let u = u.clone();
 
         handles.push(tokio::spawn(async move {
-            check(
-                u.as_ref(),
-                bot.clone(),
-                config.clone(),
-                client.clone(),
-            )
-            .await
+            check(u.as_ref(), bot.clone(), config.clone()).await
         }));
     }
     futures::future::join_all(handles).await;
@@ -77,17 +62,16 @@ async fn check<'a>(
     url: &str,
     bot: Bot,
     config: Config,
-    client: Client<hyper_rustls::HttpsConnector<hyper::client::HttpConnector>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut number_of_fail: u64 = 0;
     let mut number_of_success: u64 = 0;
     let mut fail_in_row: u64 = 0;
 
-    match url.parse::<Uri>() {
+    match url.parse::<reqwest::Url>() {
         Ok(uri) => loop {
             let mut message: Option<String> = None;
 
-            match client.get(uri.clone()).await {
+            match reqwest::get(uri.clone()).await {
                 Result::Ok(response) if (response.status() == StatusCode::OK) => {
                     number_of_success += 1;
 
