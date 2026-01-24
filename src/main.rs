@@ -21,6 +21,8 @@ struct Config {
     addresses: Vec<String>,
 }
 
+mod config;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     if std::env::var(CONFIG_ENV).is_err() {
