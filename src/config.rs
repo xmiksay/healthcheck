@@ -277,6 +277,7 @@ impl AppState {
         let services = config
             .services
             .iter()
+            .filter(|(_, service)| service.enabled)
             .map(|(id, service)| {
                 (
                     *id,
@@ -457,11 +458,15 @@ impl AppState {
             let mut services = self.services.write().await;
             let now = Utc::now();
 
-            // Remove services that no longer exist in the new config
-            services.retain(|uuid, _| new_config.services.contains_key(uuid));
+            // Remove services that no longer exist or are now disabled
+            services.retain(|uuid, _| {
+                new_config.services.get(uuid)
+                    .map(|s| s.enabled)
+                    .unwrap_or(false)
+            });
 
-            // Add or update services
-            for (id, service) in new_config.services.iter() {
+            // Add or update enabled services only
+            for (id, service) in new_config.services.iter().filter(|(_, s)| s.enabled) {
                 services.entry(*id).or_insert_with(|| ServiceState {
                     name: service.name.clone(),
                     description: service.description.clone(),

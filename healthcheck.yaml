@@ -1,51 +1,46 @@
-telegram_token: "5659478822:AAFELvdwNL6SB6rFbkm6wlPiL_1Dp-Ag5Nk"
+telegram_token: 5659478822:AAFELvdwNL6SB6rFbkm6wlPiL_1Dp-Ag5Nk
 telegram_chat_id: -1003483996515
 check_interval_success: 10000
 check_interval_fail: 10000
 notify_failures: 3
 rereport: 10
-web_port: 8080
-
 services:
-  550e8400-e29b-41d4-a716-446655440001:
-    enabled: true
-    name: "Google"
-    description: "Google homepage"
-    check: !http
-      url: "https://www.google.com"
-      expected_status: 200
-
-  550e8400-e29b-41d4-a716-446655440002:
-    enabled: true
-    name: "Example.com"
-    description: "Example website"
-    check: !http
-      url: "https://example.com"
-      expected_status: 200
-
   550e8400-e29b-41d4-a716-446655440003:
     enabled: true
-    name: "Local"
-    description: "Example website2"
+    name: Local
+    description: Example website2
     check: !http
-      url: "http://localhost:8080/api/health"
+      url: http://localhost:8080/api/health
       expected_status: 200
-
-  660e8400-e29b-41d4-a716-446655440001:
-    enabled: true
-    name: "Local HTTP"
-    description: "Test local HTTP server"
-    check: !tcpPing
-      host: "localhost"
-      port: 8080
-      timeout_ms: 3000
-
   770e8400-e29b-41d4-a716-446655440001:
     enabled: true
-    name: "Google Certificate"
-    description: "Check Google's SSL certificate expiration"
-    check_interval_success: 30000 # Custom: check every 30s instead of default 10s
+    name: Google Certificate
+    description: Check Google's SSL certificate expiration
+    check_interval_success: 30000
     check: !certificate
-      host: "expired.badssl.com"
+      host: google.com
       port: 443
       days_before_expiry: 30
+  550e8400-e29b-41d4-a716-446655440001:
+    enabled: true
+    name: Google
+    description: Google homepage
+    check: !http
+      url: https://www.google.com
+      expected_status: 200
+  660e8400-e29b-41d4-a716-446655440001:
+    enabled: true
+    name: Local HTTP
+    description: Test local HTTP server
+    check: !tcpPing
+      host: localhost
+      port: 8080
+      timeout_ms: 3000
+  550e8400-e29b-41d4-a716-446655440002:
+    enabled: true
+    name: Example.com
+    description: Example website
+    check: !http
+      url: https://example.com
+      expected_status: 200
+web_port: 8080

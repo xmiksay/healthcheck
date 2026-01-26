@@ -244,7 +244,6 @@
             <th>Description</th>
             <th>Uptime</th>
             <th>Last Check</th>
-            <th>Enabled</th>
           </tr>
         </thead>
         <tbody>
@@ -262,10 +261,6 @@
               <span ng-if="!service.uptime_start" class="no-uptime">-</span>
             </td>
             <td class="time-cell">{{service.last_check | date:'yyyy-MM-dd HH:mm:ss'}}</td>
-            <td class="enabled-cell">
-              <span ng-if="service.enabled" class="enabled">Yes</span>
-              <span ng-if="!service.enabled" class="disabled">No</span>
-            </td>
           </tr>
         </tbody>
       </table>

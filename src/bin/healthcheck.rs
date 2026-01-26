@@ -24,7 +24,8 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::load(Path::new(&config_path))?;
 
     tracing::info!("Loaded configuration from {}", config_path);
-    tracing::info!("Monitoring {} services", config.services.len());
+    let enabled_count = config.services.values().filter(|s| s.enabled).count();
+    tracing::info!("Monitoring {} enabled services (total: {})", enabled_count, config.services.len());
 
     // Create application state
     let app_state = AppState::new(config.clone(), config_path);
