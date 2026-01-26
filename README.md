@@ -218,6 +218,7 @@ Both editors support:
 - Live configuration updates
 - Automatic service restart
 - Validation before saving
+- Persistent storage (changes are written to configuration file)
 
 ## API Endpoints
 
@@ -272,7 +273,7 @@ Returns current configuration.
 ```
 
 ### PUT /api/config
-Update configuration (triggers service restart).
+Update configuration (writes to configuration file and triggers service restart).
 
 **Request:**
 ```json

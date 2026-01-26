@@ -268,10 +268,11 @@ pub struct AppState {
     config: Arc<RwLock<Config>>,
     task_handles: Arc<RwLock<HashMap<uuid::Uuid, tokio::task::JoinHandle<()>>>>,
     telegram: Arc<TelegramClient>,
+    config_path: Arc<String>,
 }
 
 impl AppState {
-    pub fn new(config: Config) -> Self {
+    pub fn new(config: Config, config_path: String) -> Self {
         let now = Utc::now();
         let services = config
             .services
@@ -305,6 +306,7 @@ impl AppState {
             config: Arc::new(RwLock::new(config)),
             task_handles: Arc::new(RwLock::new(HashMap::new())),
             telegram,
+            config_path: Arc::new(config_path),
         }
     }
 
@@ -437,6 +439,12 @@ impl AppState {
 
         // Stop all existing tasks
         self.stop_all_tasks().await;
+
+        // Write configuration to file
+        tracing::info!("Writing configuration to {}", self.config_path);
+        let yaml_content = serde_yaml::to_string(&new_config)?;
+        std::fs::write(self.config_path.as_ref(), yaml_content)?;
+        tracing::info!("Configuration file updated successfully");
 
         // Update the configuration
         {

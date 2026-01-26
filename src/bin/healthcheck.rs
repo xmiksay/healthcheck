@@ -27,7 +27,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Monitoring {} services", config.services.len());
 
     // Create application state
-    let app_state = AppState::new(config.clone());
+    let app_state = AppState::new(config.clone(), config_path);
 
     // Start service monitoring tasks
     app_state.start_monitoring_tasks().await;
