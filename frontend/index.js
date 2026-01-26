@@ -13,7 +13,9 @@ angular.module('healthCheckApp', [])
     healthCheck.lastUpdate = null;
     healthCheck.autoRefresh = true;
     healthCheck.showConfigEditor = false;
+    healthCheck.configEditorMode = 'visual';
     healthCheck.config = null;
+    healthCheck.editConfig = null;
     healthCheck.configJson = '';
     healthCheck.configError = null;
     healthCheck.configSuccess = null;
@@ -44,12 +46,190 @@ angular.module('healthCheckApp', [])
         .then(function(response) {
           healthCheck.config = response.data;
           healthCheck.configJson = JSON.stringify(response.data, null, 2);
+          healthCheck.editConfig = healthCheck.parseConfigForVisualEditor(response.data);
           healthCheck.configError = null;
         })
         .catch(function(error) {
           healthCheck.configError = 'Failed to load configuration: ' + (error.statusText || error.message);
           console.error('Error loading config:', error);
         });
+    };
+
+    // Parse config from API format to visual editor format
+    healthCheck.parseConfigForVisualEditor = function(config) {
+      var editConfig = {
+        telegram_token: config.telegram_token,
+        telegram_chat_id: config.telegram_chat_id,
+        check_interval_success: config.check_interval_success,
+        check_interval_fail: config.check_interval_fail,
+        notify_failures: config.notify_failures,
+        rereport: config.rereport,
+        web_port: config.web_port,
+        services: {}
+      };
+
+      // Parse services
+      for (var uuid in config.services) {
+        var service = config.services[uuid];
+        var editService = {
+          enabled: service.enabled,
+          name: service.name,
+          description: service.description,
+          check_interval_success: service.check_interval_success,
+          check_interval_fail: service.check_interval_fail,
+          notify_failures: service.notify_failures,
+          rereport: service.rereport,
+          showAdvanced: false,
+          check: {}
+        };
+
+        // Determine check type and parse check data
+        if (service.check.http) {
+          editService.checkType = 'http';
+          editService.check.http = {
+            url: service.check.http.url,
+            expected_status: service.check.http.expected_status
+          };
+        } else if (service.check.certificate) {
+          editService.checkType = 'certificate';
+          editService.check.certificate = {
+            host: service.check.certificate.host,
+            port: service.check.certificate.port,
+            days_before_expiry: service.check.certificate.days_before_expiry
+          };
+        } else if (service.check.tcpPing) {
+          editService.checkType = 'tcpPing';
+          editService.check.tcpPing = {
+            host: service.check.tcpPing.host,
+            port: service.check.tcpPing.port,
+            timeout_ms: service.check.tcpPing.timeout_ms
+          };
+        }
+
+        editConfig.services[uuid] = editService;
+      }
+
+      return editConfig;
+    };
+
+    // Convert visual editor format back to API format
+    healthCheck.convertVisualEditorToConfig = function() {
+      var config = {
+        telegram_token: healthCheck.editConfig.telegram_token,
+        telegram_chat_id: healthCheck.editConfig.telegram_chat_id,
+        check_interval_success: healthCheck.editConfig.check_interval_success,
+        check_interval_fail: healthCheck.editConfig.check_interval_fail,
+        notify_failures: healthCheck.editConfig.notify_failures,
+        rereport: healthCheck.editConfig.rereport,
+        web_port: healthCheck.editConfig.web_port,
+        services: {}
+      };
+
+      // Convert services
+      for (var uuid in healthCheck.editConfig.services) {
+        var editService = healthCheck.editConfig.services[uuid];
+        var service = {
+          enabled: editService.enabled,
+          name: editService.name,
+          description: editService.description
+        };
+
+        // Add optional fields only if set
+        if (editService.check_interval_success) {
+          service.check_interval_success = editService.check_interval_success;
+        }
+        if (editService.check_interval_fail) {
+          service.check_interval_fail = editService.check_interval_fail;
+        }
+        if (editService.notify_failures) {
+          service.notify_failures = editService.notify_failures;
+        }
+        if (editService.rereport) {
+          service.rereport = editService.rereport;
+        }
+
+        // Convert check based on type
+        service.check = {};
+        if (editService.checkType === 'http') {
+          service.check.http = {
+            url: editService.check.http.url
+          };
+          if (editService.check.http.expected_status) {
+            service.check.http.expected_status = editService.check.http.expected_status;
+          }
+        } else if (editService.checkType === 'certificate') {
+          service.check.certificate = {
+            host: editService.check.certificate.host,
+            port: editService.check.certificate.port,
+            days_before_expiry: editService.check.certificate.days_before_expiry
+          };
+        } else if (editService.checkType === 'tcpPing') {
+          service.check.tcpPing = {
+            host: editService.check.tcpPing.host,
+            port: editService.check.tcpPing.port,
+            timeout_ms: editService.check.tcpPing.timeout_ms
+          };
+        }
+
+        config.services[uuid] = service;
+      }
+
+      return config;
+    };
+
+    // Add new service
+    healthCheck.addNewService = function() {
+      var newUuid = healthCheck.generateUuid();
+      healthCheck.editConfig.services[newUuid] = {
+        enabled: true,
+        name: '',
+        description: '',
+        checkType: 'http',
+        check: {
+          http: {
+            url: '',
+            expected_status: 200
+          }
+        },
+        showAdvanced: false
+      };
+    };
+
+    // Remove service
+    healthCheck.removeService = function(uuid) {
+      delete healthCheck.editConfig.services[uuid];
+    };
+
+    // Update check type
+    healthCheck.updateCheckType = function(service) {
+      service.check = {};
+      if (service.checkType === 'http') {
+        service.check.http = {
+          url: '',
+          expected_status: 200
+        };
+      } else if (service.checkType === 'certificate') {
+        service.check.certificate = {
+          host: '',
+          port: 443,
+          days_before_expiry: 30
+        };
+      } else if (service.checkType === 'tcpPing') {
+        service.check.tcpPing = {
+          host: '',
+          port: 80,
+          timeout_ms: 3000
+        };
+      }
+    };
+
+    // Generate UUID v4
+    healthCheck.generateUuid = function() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = Math.random() * 16 | 0;
+        var v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
     };
 
     // Toggle configuration editor
@@ -67,18 +247,29 @@ angular.module('healthCheckApp', [])
       healthCheck.configError = null;
       healthCheck.configSuccess = null;
 
-      // Validate JSON
       var newConfig;
-      try {
-        newConfig = JSON.parse(healthCheck.configJson);
-      } catch (e) {
-        healthCheck.configError = 'Invalid JSON: ' + e.message;
-        return;
+
+      // Get config based on editor mode
+      if (healthCheck.configEditorMode === 'visual') {
+        try {
+          newConfig = healthCheck.convertVisualEditorToConfig();
+        } catch (e) {
+          healthCheck.configError = 'Invalid configuration: ' + e.message;
+          return;
+        }
+      } else {
+        // Validate JSON
+        try {
+          newConfig = JSON.parse(healthCheck.configJson);
+        } catch (e) {
+          healthCheck.configError = 'Invalid JSON: ' + e.message;
+          return;
+        }
       }
 
       // Send to API
       $http.put(CONFIG_URL, newConfig)
-        .then(function(response) {
+        .then(function() {
           healthCheck.configSuccess = 'Configuration updated successfully! Services are restarting...';
           healthCheck.config = newConfig;
 
@@ -102,6 +293,7 @@ angular.module('healthCheckApp', [])
       healthCheck.configSuccess = null;
       if (healthCheck.config) {
         healthCheck.configJson = JSON.stringify(healthCheck.config, null, 2);
+        healthCheck.editConfig = healthCheck.parseConfigForVisualEditor(healthCheck.config);
       }
     };
 

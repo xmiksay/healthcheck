@@ -41,14 +41,190 @@
           {{healthCheck.configSuccess}}
         </div>
 
-        <div class="config-help">
-          <p><strong>Note:</strong> Edit the JSON configuration below. Changes will restart all monitoring tasks.</p>
+        <div class="config-tabs">
+          <button
+            ng-click="healthCheck.configEditorMode = 'visual'"
+            ng-class="{active: healthCheck.configEditorMode === 'visual'}"
+            class="tab-btn">
+            Visual Editor
+          </button>
+          <button
+            ng-click="healthCheck.configEditorMode = 'raw'"
+            ng-class="{active: healthCheck.configEditorMode === 'raw'}"
+            class="tab-btn">
+            Raw Editor
+          </button>
         </div>
 
-        <textarea
-          ng-model="healthCheck.configJson"
-          class="config-textarea"
-          placeholder="Loading configuration..."></textarea>
+        <!-- Visual Editor -->
+        <div ng-if="healthCheck.configEditorMode === 'visual'" class="visual-editor">
+          <div class="config-help">
+            <p><strong>Note:</strong> Edit the configuration using the form below. Changes will restart all monitoring tasks.</p>
+          </div>
+
+          <!-- Global Settings -->
+          <div class="config-section">
+            <h3>Global Settings</h3>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Telegram Bot Token:</label>
+                <input type="text" ng-model="healthCheck.editConfig.telegram_token" placeholder="Bot token">
+              </div>
+              <div class="form-group">
+                <label>Telegram Chat ID:</label>
+                <input type="number" ng-model="healthCheck.editConfig.telegram_chat_id" placeholder="Chat ID">
+              </div>
+              <div class="form-group">
+                <label>Check Interval Success (ms):</label>
+                <input type="number" ng-model="healthCheck.editConfig.check_interval_success" placeholder="10000">
+              </div>
+              <div class="form-group">
+                <label>Check Interval Fail (ms):</label>
+                <input type="number" ng-model="healthCheck.editConfig.check_interval_fail" placeholder="10000">
+              </div>
+              <div class="form-group">
+                <label>Notify After Failures:</label>
+                <input type="number" ng-model="healthCheck.editConfig.notify_failures" placeholder="3">
+              </div>
+              <div class="form-group">
+                <label>Rereport Every N Failures:</label>
+                <input type="number" ng-model="healthCheck.editConfig.rereport" placeholder="10">
+              </div>
+              <div class="form-group">
+                <label>Web Port:</label>
+                <input type="number" ng-model="healthCheck.editConfig.web_port" placeholder="8080">
+              </div>
+            </div>
+          </div>
+
+          <!-- Services -->
+          <div class="config-section">
+            <h3>Services</h3>
+            <button ng-click="healthCheck.addNewService()" class="add-service-btn">+ Add New Service</button>
+
+            <div class="services-list">
+              <div ng-repeat="(uuid, service) in healthCheck.editConfig.services" class="service-editor">
+                <div class="service-header">
+                  <h4>{{service.name || 'New Service'}}</h4>
+                  <button ng-click="healthCheck.removeService(uuid)" class="delete-service-btn">Delete</button>
+                </div>
+
+                <div class="form-grid">
+                  <div class="form-group">
+                    <label>Enabled:</label>
+                    <input type="checkbox" ng-model="service.enabled">
+                  </div>
+                  <div class="form-group">
+                    <label>Name:</label>
+                    <input type="text" ng-model="service.name" placeholder="Service name">
+                  </div>
+                  <div class="form-group full-width">
+                    <label>Description:</label>
+                    <input type="text" ng-model="service.description" placeholder="Service description">
+                  </div>
+                  <div class="form-group">
+                    <label>Check Type:</label>
+                    <select ng-model="service.checkType" ng-change="healthCheck.updateCheckType(service)">
+                      <option value="http">HTTP</option>
+                      <option value="certificate">Certificate</option>
+                      <option value="tcpPing">TCP Ping</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- HTTP Check -->
+                <div ng-if="service.checkType === 'http'" class="check-config">
+                  <h5>HTTP Check Configuration</h5>
+                  <div class="form-grid">
+                    <div class="form-group full-width">
+                      <label>URL:</label>
+                      <input type="text" ng-model="service.check.http.url" placeholder="https://example.com">
+                    </div>
+                    <div class="form-group">
+                      <label>Expected Status Code:</label>
+                      <input type="number" ng-model="service.check.http.expected_status" placeholder="200">
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Certificate Check -->
+                <div ng-if="service.checkType === 'certificate'" class="check-config">
+                  <h5>Certificate Check Configuration</h5>
+                  <div class="form-grid">
+                    <div class="form-group">
+                      <label>Host:</label>
+                      <input type="text" ng-model="service.check.certificate.host" placeholder="example.com">
+                    </div>
+                    <div class="form-group">
+                      <label>Port:</label>
+                      <input type="number" ng-model="service.check.certificate.port" placeholder="443">
+                    </div>
+                    <div class="form-group">
+                      <label>Days Before Expiry:</label>
+                      <input type="number" ng-model="service.check.certificate.days_before_expiry" placeholder="30">
+                    </div>
+                  </div>
+                </div>
+
+                <!-- TCP Ping Check -->
+                <div ng-if="service.checkType === 'tcpPing'" class="check-config">
+                  <h5>TCP Ping Configuration</h5>
+                  <div class="form-grid">
+                    <div class="form-group">
+                      <label>Host:</label>
+                      <input type="text" ng-model="service.check.tcpPing.host" placeholder="localhost">
+                    </div>
+                    <div class="form-group">
+                      <label>Port:</label>
+                      <input type="number" ng-model="service.check.tcpPing.port" placeholder="8080">
+                    </div>
+                    <div class="form-group">
+                      <label>Timeout (ms):</label>
+                      <input type="number" ng-model="service.check.tcpPing.timeout_ms" placeholder="3000">
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Optional Intervals -->
+                <div class="advanced-options">
+                  <button ng-click="service.showAdvanced = !service.showAdvanced" class="toggle-advanced-btn">
+                    {{service.showAdvanced ? '▼' : '▶'}} Advanced Options
+                  </button>
+                  <div ng-if="service.showAdvanced" class="form-grid">
+                    <div class="form-group">
+                      <label>Check Interval Success (ms):</label>
+                      <input type="number" ng-model="service.check_interval_success" placeholder="Use global">
+                    </div>
+                    <div class="form-group">
+                      <label>Check Interval Fail (ms):</label>
+                      <input type="number" ng-model="service.check_interval_fail" placeholder="Use global">
+                    </div>
+                    <div class="form-group">
+                      <label>Notify After Failures:</label>
+                      <input type="number" ng-model="service.notify_failures" placeholder="Use global">
+                    </div>
+                    <div class="form-group">
+                      <label>Rereport Every N Failures:</label>
+                      <input type="number" ng-model="service.rereport" placeholder="Use global">
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Raw Editor -->
+        <div ng-if="healthCheck.configEditorMode === 'raw'" class="raw-editor">
+          <div class="config-help">
+            <p><strong>Note:</strong> Edit the YAML configuration below. Changes will restart all monitoring tasks.</p>
+          </div>
+
+          <textarea
+            ng-model="healthCheck.configJson"
+            class="config-textarea"
+            placeholder="Loading configuration..."></textarea>
+        </div>
 
         <div class="config-buttons">
           <button ng-click="healthCheck.saveConfig()" class="save-btn">Save Configuration</button>

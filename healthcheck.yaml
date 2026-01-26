@@ -23,6 +23,14 @@ services:
       url: "https://example.com"
       expected_status: 200
 
+  550e8400-e29b-41d4-a716-446655440003:
+    enabled: true
+    name: "Local"
+    description: "Example website2"
+    check: !http
+      url: "http://localhost:8080/api/health"
+      expected_status: 200
+
   660e8400-e29b-41d4-a716-446655440001:
     enabled: true
     name: "Local HTTP"

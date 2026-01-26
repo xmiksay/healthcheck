@@ -1,6 +1,6 @@
 # Healthcheck Service Monitor Configuration
 
-# Telegram notification settings
+# Telegram notification settings (required)
 telegram_token: "YOUR_TELEGRAM_BOT_TOKEN"
 telegram_chat_id: 123456789
 
@@ -21,80 +21,104 @@ services:
     enabled: true
     name: "Example Website"
     description: "Main company website health check"
-    check_interval_success: 30000
-    check_interval_fail: 5000
-    item:
-      Http:
-        url: "https://example.com"
-        expected_status: 200
+    check_interval_success: 30000  # Optional: override global setting
+    check_interval_fail: 5000      # Optional: override global setting
+    check: !http
+      url: "https://example.com"
+      expected_status: 200
 
-  # Example 2: API endpoint
+  # Example 2: API endpoint (uses global intervals)
   550e8400-e29b-41d4-a716-446655440002:
     enabled: true
     name: "API Health Endpoint"
     description: "REST API health status"
-    item:
-      Http:
-        url: "https://api.example.com/health"
-        expected_status: 200
+    check: !http
+      url: "https://api.example.com/health"
+      expected_status: 200
 
   # Example 3: Google homepage
   550e8400-e29b-41d4-a716-446655440003:
     enabled: true
     name: "Google"
     description: "Google homepage availability"
-    check_interval_success: 120000
-    item:
-      Http:
-        url: "https://www.google.com"
+    check: !http
+      url: "https://www.google.com"
 
-  # Example 4: TCP connectivity check
+  # Example 4: TCP connectivity check (database)
   660e8400-e29b-41d4-a716-446655440001:
     enabled: true
-    name: "Database Server"
+    name: "PostgreSQL Database"
     description: "PostgreSQL database connectivity"
-    check_interval_success: 120000
-    item:
-      TCPPing:
-        host: "localhost"
-        port: 5432
-        timeout_ms: 5000
+    check: !tcpPing
+      host: "localhost"
+      port: 5432
+      timeout_ms: 5000
 
   # Example 5: Redis cache
   660e8400-e29b-41d4-a716-446655440002:
     enabled: true
     name: "Redis Cache"
     description: "Redis server connectivity"
-    item:
-      TCPPing:
-        host: "localhost"
-        port: 6379
-        timeout_ms: 3000
+    check: !tcpPing
+      host: "localhost"
+      port: 6379
+      timeout_ms: 3000
 
-  # Example 6: SSH server
+  # Example 6: SSH server (disabled)
   660e8400-e29b-41d4-a716-446655440003:
     enabled: false
     name: "SSH Server"
     description: "SSH server availability"
-    item:
-      TCPPing:
-        host: "example.com"
-        port: 22
-        timeout_ms: 5000
+    check: !tcpPing
+      host: "example.com"
+      port: 22
+      timeout_ms: 5000
 
-  # Example 7: SSL Certificate check (not yet implemented)
+  # Example 7: SSL Certificate expiration check
   770e8400-e29b-41d4-a716-446655440001:
-    enabled: false  # Disabled - certificate checking not implemented yet
+    enabled: true
     name: "SSL Certificate"
-    description: "Monitor SSL certificate expiration"
-    item:
-      Certificate:
-        host: "example.com"
-        port: 443
-        days_before_expiry: 30
+    description: "Monitor SSL certificate expiration for example.com"
+    check_interval_success: 86400000  # Check once per day (24 hours)
+    check: !certificate
+      host: "example.com"
+      port: 443
+      days_before_expiry: 30  # Alert if certificate expires within 30 days
+
+  # Example 8: Another certificate check
+  770e8400-e29b-41d4-a716-446655440002:
+    enabled: false
+    name: "API SSL Certificate"
+    description: "Monitor API SSL certificate"
+    check: !certificate
+      host: "api.example.com"
+      port: 443
+      days_before_expiry: 14
+
+# Service-level optional overrides (any can be omitted to use global defaults):
+#   check_interval_success: milliseconds  # Override check interval when healthy
+#   check_interval_fail: milliseconds     # Override check interval when failing
+#   notify_failures: number               # Override failure threshold for notifications
+#   rereport: number                      # Override rereport interval
+
+# Check types:
+#   !http          - HTTP/HTTPS endpoint monitoring
+#     - url: string (required)
+#     - expected_status: number (optional, default: 200)
+#
+#   !tcpPing       - TCP connectivity check
+#     - host: string (required)
+#     - port: number (required)
+#     - timeout_ms: number (required)
+#
+#   !certificate   - SSL certificate expiration monitoring
+#     - host: string (required)
+#     - port: number (required)
+#     - days_before_expiry: number (required)
 
 # To generate a new UUID, use one of:
 # - Online: https://www.uuidgenerator.net/
 # - Command line: uuidgen (Linux/Mac)
 # - Python: python3 -c "import uuid; print(uuid.uuid4())"
 # - PowerShell: [guid]::NewGuid()
+# - Visual editor: Use "Add New Service" button in web UI
