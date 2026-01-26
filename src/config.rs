@@ -190,7 +190,7 @@ pub struct Service {
 }
 
 impl Service {
-    pub async fn run(&self, uuid: uuid::Uuid, app_state: AppState) {
+    pub async fn run(&self, id: String, app_state: AppState) {
         loop {
             tracing::info!("Running health check for service: {}", self.name);
 
@@ -208,7 +208,7 @@ impl Service {
             }
 
             // Update state in the global store
-            app_state.set_state(uuid, state.clone()).await;
+            app_state.set_state(id.clone(), state.clone()).await;
 
             // Get global config defaults
             let config = app_state.get_config().await;
@@ -249,7 +249,7 @@ pub struct Config {
     pub check_interval_fail: u64,
     pub notify_failures: u64,
     pub rereport: u64,
-    pub services: HashMap<uuid::Uuid, Service>,
+    pub services: HashMap<String, Service>,
     pub web_port: Option<u16>,
 }
 
@@ -264,9 +264,9 @@ impl Config {
 // AppState manages the runtime state of all services
 #[derive(Clone)]
 pub struct AppState {
-    services: Arc<RwLock<HashMap<uuid::Uuid, ServiceState>>>,
+    services: Arc<RwLock<HashMap<String, ServiceState>>>,
     config: Arc<RwLock<Config>>,
-    task_handles: Arc<RwLock<HashMap<uuid::Uuid, tokio::task::JoinHandle<()>>>>,
+    task_handles: Arc<RwLock<HashMap<String, tokio::task::JoinHandle<()>>>>,
     telegram: Arc<TelegramClient>,
     config_path: Arc<String>,
 }
@@ -280,7 +280,7 @@ impl AppState {
             .filter(|(_, service)| service.enabled)
             .map(|(id, service)| {
                 (
-                    *id,
+                    id.clone(),
                     ServiceState {
                         name: service.name.clone(),
                         description: service.description.clone(),
@@ -311,11 +311,11 @@ impl AppState {
         }
     }
 
-    pub async fn set_state(&self, uuid: uuid::Uuid, state: State) {
+    pub async fn set_state(&self, id: String, state: State) {
         // Determine notification action before modifying state
         let notification = {
             let mut services = self.services.write().await;
-            if let Some(service_state) = services.get_mut(&uuid) {
+            if let Some(service_state) = services.get_mut(&id) {
                 let now = Utc::now();
                 let previous_failures = service_state.consecutive_failures;
                 let was_failing = previous_failures > 0;
@@ -325,7 +325,7 @@ impl AppState {
                 service_state.total_checks += 1;
 
                 let config = self.config.read().await;
-                let service = config.services.get(&uuid);
+                let service = config.services.get(&id);
                 let notify_failures = service
                     .and_then(|s| s.notify_failures)
                     .unwrap_or(config.notify_failures);
@@ -415,13 +415,13 @@ impl AppState {
             tracing::info!("Starting monitor for service '{}'", service.name);
             let service_clone = service.clone();
             let state_clone = self.clone();
-            let uuid_clone = *uuid;
+            let id_clone = uuid.clone();
 
             let handle = tokio::spawn(async move {
-                service_clone.run(uuid_clone, state_clone).await;
+                service_clone.run(id_clone, state_clone).await;
             });
 
-            handles.insert(*uuid, handle);
+            handles.insert(uuid.clone(), handle);
         }
     }
 
@@ -429,8 +429,8 @@ impl AppState {
         tracing::info!("Stopping all monitoring tasks");
         let mut handles = self.task_handles.write().await;
 
-        for (uuid, handle) in handles.drain() {
-            tracing::debug!("Aborting task for service UUID: {}", uuid);
+        for (id, handle) in handles.drain() {
+            tracing::debug!("Aborting task for service ID: {}", id);
             handle.abort();
         }
     }
@@ -459,15 +459,15 @@ impl AppState {
             let now = Utc::now();
 
             // Remove services that no longer exist or are now disabled
-            services.retain(|uuid, _| {
-                new_config.services.get(uuid)
+            services.retain(|id, _| {
+                new_config.services.get(id)
                     .map(|s| s.enabled)
                     .unwrap_or(false)
             });
 
             // Add or update enabled services only
             for (id, service) in new_config.services.iter().filter(|(_, s)| s.enabled) {
-                services.entry(*id).or_insert_with(|| ServiceState {
+                services.entry(id.clone()).or_insert_with(|| ServiceState {
                     name: service.name.clone(),
                     description: service.description.clone(),
                     state: State::Unknown,

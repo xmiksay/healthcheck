@@ -29,10 +29,10 @@ enum Commands {
         message: String,
     },
 
-    /// Test a service by UUID
+    /// Test a service by ID
     TestService {
-        /// UUID of the service to test
-        uuid: String,
+        /// ID of the service to test
+        id: String,
     },
 }
 
@@ -55,8 +55,8 @@ async fn main() -> anyhow::Result<()> {
         Commands::Telegram { message_type, message } => {
             handle_telegram_command(&config, message_type, message).await?;
         }
-        Commands::TestService { uuid } => {
-            handle_test_service_command(&config, uuid).await?;
+        Commands::TestService { id } => {
+            handle_test_service_command(&config, id).await?;
         }
     }
 
@@ -92,16 +92,13 @@ async fn handle_telegram_command(
 
 async fn handle_test_service_command(
     config: &Config,
-    uuid_str: &str,
+    id: &str,
 ) -> anyhow::Result<()> {
-    // Parse UUID
-    let uuid = uuid::Uuid::parse_str(uuid_str)?;
-
     // Find service in config
     let service = config
         .services
-        .get(&uuid)
-        .ok_or_else(|| anyhow::anyhow!("Service with UUID {} not found", uuid))?;
+        .get(id)
+        .ok_or_else(|| anyhow::anyhow!("Service with ID '{}' not found", id))?;
 
     println!("Testing service: {}", service.name);
     println!("Description: {}", service.description);

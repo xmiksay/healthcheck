@@ -5,14 +5,14 @@ check_interval_fail: 10000
 notify_failures: 3
 rereport: 10
 services:
-  550e8400-e29b-41d4-a716-446655440003:
+  local-api:
     enabled: true
     name: Local
     description: Example website2
     check: !http
       url: http://localhost:8080/api/health
       expected_status: 200
-  770e8400-e29b-41d4-a716-446655440001:
+  google-cert:
     enabled: true
     name: Google Certificate
     description: Check Google's SSL certificate expiration
@@ -21,14 +21,14 @@ services:
       host: google.com
       port: 443
       days_before_expiry: 30
-  550e8400-e29b-41d4-a716-446655440001:
+  google:
     enabled: true
     name: Google
     description: Google homepage
     check: !http
       url: https://www.google.com
       expected_status: 200
-  660e8400-e29b-41d4-a716-446655440001:
+  local-http:
     enabled: true
     name: Local HTTP
     description: Test local HTTP server
@@ -36,7 +36,7 @@ services:
       host: localhost
       port: 8080
       timeout_ms: 3000
-  550e8400-e29b-41d4-a716-446655440002:
+  example-com:
     enabled: true
     name: Example.com
     description: Example website

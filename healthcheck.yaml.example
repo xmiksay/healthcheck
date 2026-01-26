@@ -14,10 +14,10 @@ rereport: 10                   # Re-notify every 10 failures
 web_port: 8080
 
 # Services to monitor
-# Each service must have a unique UUID
+# Each service must have a unique identifier (can be any string)
 services:
   # Example 1: HTTP health check
-  550e8400-e29b-41d4-a716-446655440001:
+  example-website:
     enabled: true
     name: "Example Website"
     description: "Main company website health check"
@@ -28,7 +28,7 @@ services:
       expected_status: 200
 
   # Example 2: API endpoint (uses global intervals)
-  550e8400-e29b-41d4-a716-446655440002:
+  api-health:
     enabled: true
     name: "API Health Endpoint"
     description: "REST API health status"
@@ -37,7 +37,7 @@ services:
       expected_status: 200
 
   # Example 3: Google homepage
-  550e8400-e29b-41d4-a716-446655440003:
+  google-homepage:
     enabled: true
     name: "Google"
     description: "Google homepage availability"
@@ -45,7 +45,7 @@ services:
       url: "https://www.google.com"
 
   # Example 4: TCP connectivity check (database)
-  660e8400-e29b-41d4-a716-446655440001:
+  postgresql-db:
     enabled: true
     name: "PostgreSQL Database"
     description: "PostgreSQL database connectivity"
@@ -55,7 +55,7 @@ services:
       timeout_ms: 5000
 
   # Example 5: Redis cache
-  660e8400-e29b-41d4-a716-446655440002:
+  redis-cache:
     enabled: true
     name: "Redis Cache"
     description: "Redis server connectivity"
@@ -65,7 +65,7 @@ services:
       timeout_ms: 3000
 
   # Example 6: SSH server (disabled)
-  660e8400-e29b-41d4-a716-446655440003:
+  ssh-server:
     enabled: false
     name: "SSH Server"
     description: "SSH server availability"
@@ -75,7 +75,7 @@ services:
       timeout_ms: 5000
 
   # Example 7: SSL Certificate expiration check
-  770e8400-e29b-41d4-a716-446655440001:
+  ssl-cert-example:
     enabled: true
     name: "SSL Certificate"
     description: "Monitor SSL certificate expiration for example.com"
@@ -86,7 +86,7 @@ services:
       days_before_expiry: 30  # Alert if certificate expires within 30 days
 
   # Example 8: Another certificate check
-  770e8400-e29b-41d4-a716-446655440002:
+  api-ssl-cert:
     enabled: false
     name: "API SSL Certificate"
     description: "Monitor API SSL certificate"
@@ -116,9 +116,5 @@ services:
 #     - port: number (required)
 #     - days_before_expiry: number (required)
 
-# To generate a new UUID, use one of:
-# - Online: https://www.uuidgenerator.net/
-# - Command line: uuidgen (Linux/Mac)
-# - Python: python3 -c "import uuid; print(uuid.uuid4())"
-# - PowerShell: [guid]::NewGuid()
-# - Visual editor: Use "Add New Service" button in web UI
+# Service identifiers can be any unique string (e.g., "my-service", "prod-api", "db-primary")
+# Use the "Add New Service" button in the web UI for automatic ID generation
