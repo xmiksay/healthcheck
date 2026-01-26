@@ -1,28 +1,73 @@
 <!doctype html>
-<html ng-app="todoApp">
+<html ng-app="healthCheckApp">
   <head>
+    <meta charset="utf-8">
+    <title>Service Health Monitor</title>
     <script src="./angular.js"></script>
     <script src="./index.js"></script>
     <link rel="stylesheet" href="index.css">
   </head>
-  <body>
-    <h2>Todo</h2>
-    <div ng-controller="TodoListController as todoList">
-      <span>{{todoList.remaining()}} of {{todoList.todos.length}} remaining</span>
-      [ <a href="" ng-click="todoList.archive()">archive</a> ]
-      <ul class="unstyled">
-        <li ng-repeat="todo in todoList.todos">
-          <label class="checkbox">
-            <input type="checkbox" ng-model="todo.done">
-            <span class="done-{{todo.done}}">{{todo.text}}</span>
-          </label>
-        </li>
-      </ul>
-      <form ng-submit="todoList.addTodo()">
-        <input type="text" ng-model="todoList.todoText"  size="30"
-               placeholder="add new todo here">
-        <input class="btn-primary" type="submit" value="add">
-      </form>
+  <body ng-controller="HealthCheckController as healthCheck">
+    <div class="container">
+      <h1>Service Health Monitor</h1>
+
+      <div class="stats">
+        <span class="stat">Total: {{healthCheck.services.length}}</span>
+        <span class="stat success">Success: {{healthCheck.countByState('Success')}}</span>
+        <span class="stat failure">Failure: {{healthCheck.countByState('Failure')}}</span>
+        <span class="stat unknown">Unknown: {{healthCheck.countByState('Unknown')}}</span>
+        <span class="stat">Last updated: {{healthCheck.lastUpdate | date:'HH:mm:ss'}}</span>
+      </div>
+
+      <div class="controls">
+        <button ng-click="healthCheck.refresh()">Refresh Now</button>
+        <label>
+          <input type="checkbox" ng-model="healthCheck.autoRefresh">
+          Auto-refresh every 5 seconds
+        </label>
+      </div>
+
+      <div class="error" ng-if="healthCheck.error">
+        Error loading services: {{healthCheck.error}}
+      </div>
+
+      <table class="services-table">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Name</th>
+            <th>Description</th>
+            <th>Uptime</th>
+            <th>Last Check</th>
+            <th>Enabled</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr ng-repeat="service in healthCheck.services"
+              class="service-row state-{{healthCheck.getStateClass(service.state)}}">
+            <td class="status-cell">
+              <span class="status-indicator status-{{healthCheck.getStateClass(service.state)}}">
+                {{healthCheck.getStateLabel(service.state)}}
+              </span>
+            </td>
+            <td class="name-cell">{{service.name}}</td>
+            <td class="description-cell">{{service.description}}</td>
+            <td class="uptime-cell">
+              <span ng-if="service.uptime_start">{{healthCheck.getUptime(service.uptime_start)}}</span>
+              <span ng-if="!service.uptime_start" class="no-uptime">-</span>
+            </td>
+            <td class="time-cell">{{service.last_check | date:'yyyy-MM-dd HH:mm:ss'}}</td>
+            <td class="enabled-cell">
+              <span ng-if="service.enabled" class="enabled">Yes</span>
+              <span ng-if="!service.enabled" class="disabled">No</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div ng-if="healthCheck.services.length === 0 && !healthCheck.error" class="no-services">
+        No services configured
+      </div>
     </div>
   </body>
 </html>

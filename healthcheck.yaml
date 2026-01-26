@@ -1,0 +1,38 @@
+telegram_token: "test_token"
+telegram_chat_id: 123456789
+check_interval_success: 60000
+check_interval_fail: 10000
+notify_failures: 3
+rereport: 10
+web_port: 8080
+
+services:
+  550e8400-e29b-41d4-a716-446655440001:
+    enabled: true
+    name: "Google"
+    description: "Google homepage"
+    check_interval_success: 10000
+    check_interval_fail: 5000
+    check:
+      Http:
+        url: "https://www.google.com"
+        expected_status: 200
+
+  550e8400-e29b-41d4-a716-446655440002:
+    enabled: true
+    name: "Example.com"
+    description: "Example website"
+    item:
+      Http:
+        url: "https://example.com"
+        expected_status: 200
+
+  660e8400-e29b-41d4-a716-446655440001:
+    enabled: true
+    name: "Local HTTP"
+    description: "Test local HTTP server"
+    item:
+      TCPPing:
+        host: "localhost"
+        port: 8080
+        timeout_ms: 3000

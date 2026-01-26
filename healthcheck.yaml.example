@@ -1,0 +1,100 @@
+# Healthcheck Service Monitor Configuration
+
+# Telegram notification settings
+telegram_token: "YOUR_TELEGRAM_BOT_TOKEN"
+telegram_chat_id: 123456789
+
+# Global defaults (in milliseconds)
+check_interval_success: 60000  # Check every 60 seconds when service is healthy
+check_interval_fail: 10000     # Check every 10 seconds when service fails
+notify_failures: 3             # Notify after 3 consecutive failures
+rereport: 10                   # Re-notify every 10 failures
+
+# Web server port for frontend and API
+web_port: 8080
+
+# Services to monitor
+# Each service must have a unique UUID
+services:
+  # Example 1: HTTP health check
+  550e8400-e29b-41d4-a716-446655440001:
+    enabled: true
+    name: "Example Website"
+    description: "Main company website health check"
+    check_interval_success: 30000
+    check_interval_fail: 5000
+    item:
+      Http:
+        url: "https://example.com"
+        expected_status: 200
+
+  # Example 2: API endpoint
+  550e8400-e29b-41d4-a716-446655440002:
+    enabled: true
+    name: "API Health Endpoint"
+    description: "REST API health status"
+    item:
+      Http:
+        url: "https://api.example.com/health"
+        expected_status: 200
+
+  # Example 3: Google homepage
+  550e8400-e29b-41d4-a716-446655440003:
+    enabled: true
+    name: "Google"
+    description: "Google homepage availability"
+    check_interval_success: 120000
+    item:
+      Http:
+        url: "https://www.google.com"
+
+  # Example 4: TCP connectivity check
+  660e8400-e29b-41d4-a716-446655440001:
+    enabled: true
+    name: "Database Server"
+    description: "PostgreSQL database connectivity"
+    check_interval_success: 120000
+    item:
+      TCPPing:
+        host: "localhost"
+        port: 5432
+        timeout_ms: 5000
+
+  # Example 5: Redis cache
+  660e8400-e29b-41d4-a716-446655440002:
+    enabled: true
+    name: "Redis Cache"
+    description: "Redis server connectivity"
+    item:
+      TCPPing:
+        host: "localhost"
+        port: 6379
+        timeout_ms: 3000
+
+  # Example 6: SSH server
+  660e8400-e29b-41d4-a716-446655440003:
+    enabled: false
+    name: "SSH Server"
+    description: "SSH server availability"
+    item:
+      TCPPing:
+        host: "example.com"
+        port: 22
+        timeout_ms: 5000
+
+  # Example 7: SSL Certificate check (not yet implemented)
+  770e8400-e29b-41d4-a716-446655440001:
+    enabled: false  # Disabled - certificate checking not implemented yet
+    name: "SSL Certificate"
+    description: "Monitor SSL certificate expiration"
+    item:
+      Certificate:
+        host: "example.com"
+        port: 443
+        days_before_expiry: 30
+
+# To generate a new UUID, use one of:
+# - Online: https://www.uuidgenerator.net/
+# - Command line: uuidgen (Linux/Mac)
+# - Python: python3 -c "import uuid; print(uuid.uuid4())"
+# - PowerShell: [guid]::NewGuid()
