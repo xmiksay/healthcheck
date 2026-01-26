@@ -50,7 +50,8 @@ impl ServiceHttp {
 pub struct ServiceCertificate {
     pub host: String,
     pub port: u16,
-    pub days_before_expiry: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub days_before_expiry: Option<u64>,
 }
 
 impl ServiceCertificate {
@@ -120,12 +121,14 @@ impl ServiceCertificate {
         let seconds_until_expiry = expiry_timestamp - now;
         let days_until_expiry = seconds_until_expiry / 86400; // 86400 seconds in a day
 
+        let threshold = self.days_before_expiry.unwrap_or(30);
+
         if days_until_expiry < 0 {
             State::Failure(format!("Certificate expired {} days ago", -days_until_expiry))
-        } else if days_until_expiry < self.days_before_expiry as i64 {
+        } else if days_until_expiry < threshold as i64 {
             State::Failure(format!(
                 "Certificate expires in {} days (threshold: {} days)",
-                days_until_expiry, self.days_before_expiry
+                days_until_expiry, threshold
             ))
         } else {
             State::Success
@@ -137,7 +140,8 @@ impl ServiceCertificate {
 pub struct ServiceTcpPing {
     pub host: String,
     pub port: u16,
-    pub timeout_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
 }
 
 impl ServiceTcpPing {
@@ -145,13 +149,14 @@ impl ServiceTcpPing {
         tracing::debug!("Starting TCP ping for host: {}:{}", self.host, self.port);
 
         let addr = format!("{}:{}", self.host, self.port);
-        let timeout = Duration::from_millis(self.timeout_ms);
+        let timeout_ms = self.timeout_ms.unwrap_or(1000);
+        let timeout = Duration::from_millis(timeout_ms);
 
         let result =
             match tokio::time::timeout(timeout, tokio::net::TcpStream::connect(&addr)).await {
                 Ok(Ok(_)) => State::Success,
                 Ok(Err(e)) => State::Failure(format!("Connection failed: {}", e)),
-                Err(_) => State::Failure(format!("Timeout after {}ms", self.timeout_ms)),
+                Err(_) => State::Failure(format!("Timeout after {}ms", timeout_ms)),
             };
 
         tracing::debug!(

@@ -52,7 +52,7 @@ services:
     check: !tcpPing
       host: "localhost"
       port: 5432
-      timeout_ms: 5000
+      timeout_ms: 5000  # Optional, defaults to 1000ms
 
   # Example 5: Redis cache
   redis-cache:
@@ -62,7 +62,7 @@ services:
     check: !tcpPing
       host: "localhost"
       port: 6379
-      timeout_ms: 3000
+      # timeout_ms omitted - will use default 1000ms
 
   # Example 6: SSH server (disabled)
   ssh-server:
@@ -72,7 +72,7 @@ services:
     check: !tcpPing
       host: "example.com"
       port: 22
-      timeout_ms: 5000
+      # timeout_ms omitted - will use default 1000ms
 
   # Example 7: SSL Certificate expiration check
   ssl-cert-example:
@@ -83,7 +83,7 @@ services:
     check: !certificate
       host: "example.com"
       port: 443
-      days_before_expiry: 30  # Alert if certificate expires within 30 days
+      days_before_expiry: 30  # Optional, defaults to 30 days
 
   # Example 8: Another certificate check
   api-ssl-cert:
@@ -93,7 +93,7 @@ services:
     check: !certificate
       host: "api.example.com"
       port: 443
-      days_before_expiry: 14
+      # days_before_expiry omitted - will use default 30 days
 
 # Service-level optional overrides (any can be omitted to use global defaults):
 #   check_interval_success: milliseconds  # Override check interval when healthy
@@ -109,12 +109,12 @@ services:
 #   !tcpPing       - TCP connectivity check
 #     - host: string (required)
 #     - port: number (required)
-#     - timeout_ms: number (required)
+#     - timeout_ms: number (optional, default: 1000)
 #
 #   !certificate   - SSL certificate expiration monitoring
 #     - host: string (required)
 #     - port: number (required)
-#     - days_before_expiry: number (required)
+#     - days_before_expiry: number (optional, default: 30)
 
 # Service identifiers can be any unique string (e.g., "my-service", "prod-api", "db-primary")
 # Use the "Add New Service" button in the web UI for automatic ID generation
