@@ -1,8 +1,11 @@
-use std::{collections::HashMap, hash::Hash, time::Duration, sync::Arc};
+use std::{collections::HashMap, hash::Hash, sync::Arc, time::Duration};
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use chrono::{DateTime, Utc};
+use tracing;
+
+use crate::telegram::TelegramClient;
 
 #[derive(Default, Hash, Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub enum State {
@@ -20,7 +23,9 @@ pub struct ServiceHttp {
 
 impl ServiceHttp {
     pub async fn check(&self) -> State {
-        match reqwest::get(&self.url).await {
+        tracing::debug!("Starting HTTP check for url: {}", self.url);
+
+        let result = match reqwest::get(&self.url).await {
             Ok(response) => {
                 let status = response.status().as_u16();
                 let expected = self.expected_status.unwrap_or(200);
@@ -31,7 +36,14 @@ impl ServiceHttp {
                 }
             }
             Err(e) => State::Failure(format!("Request failed: {}", e)),
-        }
+        };
+
+        tracing::debug!(
+            "HTTP check for url: {} completed with state: {:?}",
+            self.url,
+            result
+        );
+        result
     }
 }
 #[derive(Deserialize, Serialize, Debug, Clone, Hash)]
@@ -43,9 +55,81 @@ pub struct ServiceCertificate {
 
 impl ServiceCertificate {
     pub async fn check(&self) -> State {
-        // TODO: Implement certificate expiration check
-        // For now, return Unknown
-        State::Unknown
+        tracing::debug!(
+            "Starting certificate check for host: {}:{}",
+            self.host,
+            self.port
+        );
+
+        let result = self.check_certificate().await;
+
+        tracing::debug!(
+            "Certificate check for host: {}:{} completed with state: {:?}",
+            self.host,
+            self.port,
+            result
+        );
+        result
+    }
+
+    async fn check_certificate(&self) -> State {
+        use native_tls::TlsConnector;
+        use tokio::net::TcpStream;
+
+        // Connect to the server
+        let addr = format!("{}:{}", self.host, self.port);
+        let tcp_stream = match TcpStream::connect(&addr).await {
+            Ok(stream) => stream,
+            Err(e) => return State::Failure(format!("TCP connection failed: {}", e)),
+        };
+
+        // Create TLS connector
+        let connector = match TlsConnector::new() {
+            Ok(c) => c,
+            Err(e) => return State::Failure(format!("Failed to create TLS connector: {}", e)),
+        };
+
+        let connector = tokio_native_tls::TlsConnector::from(connector);
+
+        // Perform TLS handshake
+        let tls_stream = match connector.connect(&self.host, tcp_stream).await {
+            Ok(stream) => stream,
+            Err(e) => return State::Failure(format!("TLS handshake failed: {}", e)),
+        };
+
+        // Get the peer certificate
+        let cert = match tls_stream.get_ref().peer_certificate() {
+            Ok(Some(cert)) => cert,
+            Ok(None) => return State::Failure("No peer certificate found".to_string()),
+            Err(e) => return State::Failure(format!("Failed to get peer certificate: {}", e)),
+        };
+
+        // Parse the certificate to get expiration date
+        let der = cert.to_der().unwrap();
+        let (_, parsed_cert) = match x509_parser::parse_x509_certificate(&der) {
+            Ok(result) => result,
+            Err(e) => return State::Failure(format!("Failed to parse certificate: {}", e)),
+        };
+
+        // Get the not_after timestamp
+        let not_after = parsed_cert.validity().not_after;
+        let expiry_timestamp = not_after.timestamp();
+
+        // Calculate days until expiration
+        let now = chrono::Utc::now().timestamp();
+        let seconds_until_expiry = expiry_timestamp - now;
+        let days_until_expiry = seconds_until_expiry / 86400; // 86400 seconds in a day
+
+        if days_until_expiry < 0 {
+            State::Failure(format!("Certificate expired {} days ago", -days_until_expiry))
+        } else if days_until_expiry < self.days_before_expiry as i64 {
+            State::Failure(format!(
+                "Certificate expires in {} days (threshold: {} days)",
+                days_until_expiry, self.days_before_expiry
+            ))
+        } else {
+            State::Success
+        }
     }
 }
 
@@ -58,23 +142,34 @@ pub struct ServiceTcpPing {
 
 impl ServiceTcpPing {
     pub async fn check(&self) -> State {
+        tracing::debug!("Starting TCP ping for host: {}:{}", self.host, self.port);
+
         let addr = format!("{}:{}", self.host, self.port);
         let timeout = Duration::from_millis(self.timeout_ms);
 
-        match tokio::time::timeout(timeout, tokio::net::TcpStream::connect(&addr)).await {
-            Ok(Ok(_)) => State::Success,
-            Ok(Err(e)) => State::Failure(format!("Connection failed: {}", e)),
-            Err(_) => State::Failure(format!("Timeout after {}ms", self.timeout_ms)),
-        }
+        let result =
+            match tokio::time::timeout(timeout, tokio::net::TcpStream::connect(&addr)).await {
+                Ok(Ok(_)) => State::Success,
+                Ok(Err(e)) => State::Failure(format!("Connection failed: {}", e)),
+                Err(_) => State::Failure(format!("Timeout after {}ms", self.timeout_ms)),
+            };
+
+        tracing::debug!(
+            "TCP ping for host: {}:{} completed with state: {:?}",
+            self.host,
+            self.port,
+            result
+        );
+        result
     }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Hash)]
-#[serde(rename_all = "PascalCase")]
+#[serde(rename_all = "camelCase")]
 pub enum CheckType {
     Http(ServiceHttp),
     Certificate(ServiceCertificate),
-    #[serde(rename = "TCPPing")]
+    #[serde(rename = "tcpPing")]
     TcpPing(ServiceTcpPing),
 }
 
@@ -83,9 +178,13 @@ pub struct Service {
     pub enabled: bool,
     pub name: String,
     pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub check_interval_success: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub check_interval_fail: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub notify_failures: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rereport: Option<u64>,
     pub check: CheckType,
 }
@@ -93,22 +192,35 @@ pub struct Service {
 impl Service {
     pub async fn run(&self, uuid: uuid::Uuid, app_state: AppState) {
         loop {
+            tracing::info!("Running health check for service: {}", self.name);
+
             let state = match &self.check {
                 CheckType::Certificate(cert) => cert.check().await,
                 CheckType::Http(http) => http.check().await,
                 CheckType::TcpPing(tcp) => tcp.check().await,
             };
 
+            // Log the result
+            match &state {
+                State::Success => tracing::info!("Service '{}' check succeeded", self.name),
+                State::Failure(reason) => tracing::warn!("Service '{}' check failed: {}", self.name, reason),
+                State::Unknown => tracing::info!("Service '{}' check returned unknown state", self.name),
+            }
+
             // Update state in the global store
             app_state.set_state(uuid, state.clone()).await;
 
-            // Determine sleep interval based on state
+            // Get global config defaults
+            let config = app_state.get_config().await;
+
+            // Determine sleep interval based on state, using service override or global default
             let interval = match &state {
-                State::Success => self.check_interval_success.unwrap_or(60000),
-                State::Failure(_) => self.check_interval_fail.unwrap_or(10000),
-                State::Unknown => self.check_interval_success.unwrap_or(60000),
+                State::Success => self.check_interval_success.unwrap_or(config.check_interval_success),
+                State::Failure(_) => self.check_interval_fail.unwrap_or(config.check_interval_fail),
+                State::Unknown => self.check_interval_success.unwrap_or(config.check_interval_success),
             };
 
+            tracing::debug!("Service '{}' next check in {}ms", self.name, interval);
             tokio::time::sleep(Duration::from_millis(interval)).await;
         }
     }
@@ -117,12 +229,10 @@ impl Service {
 // ServiceState represents the current runtime state of a service for API responses
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct ServiceState {
-    pub id: uuid::Uuid,
     pub name: String,
     pub description: String,
     pub state: State,
     pub last_check: DateTime<Utc>,
-    pub enabled: bool,
     pub consecutive_failures: u64,
     pub total_checks: u64,
     pub successful_checks: u64,
@@ -156,6 +266,8 @@ impl Config {
 pub struct AppState {
     services: Arc<RwLock<HashMap<uuid::Uuid, ServiceState>>>,
     config: Arc<RwLock<Config>>,
+    task_handles: Arc<RwLock<HashMap<uuid::Uuid, tokio::task::JoinHandle<()>>>>,
+    telegram: Arc<TelegramClient>,
 }
 
 impl AppState {
@@ -168,12 +280,10 @@ impl AppState {
                 (
                     *id,
                     ServiceState {
-                        id: *id,
                         name: service.name.clone(),
                         description: service.description.clone(),
                         state: State::Unknown,
                         last_check: now,
-                        enabled: service.enabled,
                         consecutive_failures: 0,
                         total_checks: 0,
                         successful_checks: 0,
@@ -184,37 +294,96 @@ impl AppState {
             })
             .collect();
 
+        // Create Telegram client
+        let telegram = Arc::new(TelegramClient::new(
+            config.telegram_token.clone(),
+            config.telegram_chat_id,
+        ));
+
         Self {
             services: Arc::new(RwLock::new(services)),
             config: Arc::new(RwLock::new(config)),
+            task_handles: Arc::new(RwLock::new(HashMap::new())),
+            telegram,
         }
     }
 
     pub async fn set_state(&self, uuid: uuid::Uuid, state: State) {
-        let mut services = self.services.write().await;
-        if let Some(service_state) = services.get_mut(&uuid) {
-            let now = Utc::now();
-            service_state.state = state.clone();
-            service_state.last_check = now;
-            service_state.total_checks += 1;
+        // Determine notification action before modifying state
+        let notification = {
+            let mut services = self.services.write().await;
+            if let Some(service_state) = services.get_mut(&uuid) {
+                let now = Utc::now();
+                let previous_failures = service_state.consecutive_failures;
+                let was_failing = previous_failures > 0;
 
-            match state {
-                State::Success => {
-                    service_state.consecutive_failures = 0;
-                    service_state.successful_checks += 1;
+                service_state.state = state.clone();
+                service_state.last_check = now;
+                service_state.total_checks += 1;
 
-                    // Set uptime_start only on first successful check
-                    if service_state.uptime_start.is_none() {
-                        service_state.uptime_start = Some(now);
+                let config = self.config.read().await;
+                let service = config.services.get(&uuid);
+                let notify_failures = service
+                    .and_then(|s| s.notify_failures)
+                    .unwrap_or(config.notify_failures);
+                let rereport = service
+                    .and_then(|s| s.rereport)
+                    .unwrap_or(config.rereport);
+
+                let notification = match &state {
+                    State::Success => {
+                        service_state.consecutive_failures = 0;
+                        service_state.successful_checks += 1;
+
+                        // Set uptime_start only on first successful check
+                        if service_state.uptime_start.is_none() {
+                            service_state.uptime_start = Some(now);
+                        }
+
+                        // Send recovery notification if was previously failing
+                        if was_failing {
+                            Some((service_state.name.clone(), "recovered".to_string(), true))
+                        } else {
+                            None
+                        }
                     }
-                }
-                State::Failure(_) => {
-                    service_state.consecutive_failures += 1;
-                    service_state.failed_checks += 1;
-                    // Clear uptime when service fails
-                    service_state.uptime_start = None;
-                }
-                State::Unknown => {}
+                    State::Failure(reason) => {
+                        service_state.consecutive_failures += 1;
+                        service_state.failed_checks += 1;
+                        // Clear uptime when service fails
+                        service_state.uptime_start = None;
+
+                        // Send alert if consecutive failures reached threshold
+                        if service_state.consecutive_failures == notify_failures {
+                            Some((service_state.name.clone(), reason.clone(), false))
+                        }
+                        // Resend alert at rereport intervals
+                        else if service_state.consecutive_failures > notify_failures
+                            && (service_state.consecutive_failures - notify_failures) % rereport == 0 {
+                            Some((service_state.name.clone(), format!("{} (still failing)", reason), false))
+                        } else {
+                            None
+                        }
+                    }
+                    State::Unknown => None,
+                };
+
+                notification
+            } else {
+                None
+            }
+        }; // Release locks before sending notification
+
+        // Send notification if needed (outside of locks)
+        if let Some((service_name, message, is_recovery)) = notification {
+            let result = if is_recovery {
+                self.telegram.send_recovery(&service_name, &message).await
+            } else {
+                self.telegram.send_alert(&service_name, &message).await
+            };
+
+            if let Err(e) = result {
+                tracing::error!("Failed to send Telegram notification: {}", e);
             }
         }
     }
@@ -228,5 +397,87 @@ impl AppState {
 
     pub async fn get_config(&self) -> Config {
         self.config.read().await.clone()
+    }
+
+    pub async fn start_monitoring_tasks(&self) {
+        let config = self.config.read().await;
+        let mut handles = self.task_handles.write().await;
+
+        for (uuid, service) in config.services.iter() {
+            if !service.enabled {
+                tracing::info!("Service '{}' is disabled, skipping", service.name);
+                continue;
+            }
+
+            tracing::info!("Starting monitor for service '{}'", service.name);
+            let service_clone = service.clone();
+            let state_clone = self.clone();
+            let uuid_clone = *uuid;
+
+            let handle = tokio::spawn(async move {
+                service_clone.run(uuid_clone, state_clone).await;
+            });
+
+            handles.insert(*uuid, handle);
+        }
+    }
+
+    pub async fn stop_all_tasks(&self) {
+        tracing::info!("Stopping all monitoring tasks");
+        let mut handles = self.task_handles.write().await;
+
+        for (uuid, handle) in handles.drain() {
+            tracing::debug!("Aborting task for service UUID: {}", uuid);
+            handle.abort();
+        }
+    }
+
+    pub async fn update_config(&self, new_config: Config) -> anyhow::Result<()> {
+        tracing::info!("Updating configuration and restarting tasks");
+
+        // Stop all existing tasks
+        self.stop_all_tasks().await;
+
+        // Update the configuration
+        {
+            let mut config = self.config.write().await;
+            *config = new_config.clone();
+        }
+
+        // Update service states, preserving existing data where possible
+        {
+            let mut services = self.services.write().await;
+            let now = Utc::now();
+
+            // Remove services that no longer exist in the new config
+            services.retain(|uuid, _| new_config.services.contains_key(uuid));
+
+            // Add or update services
+            for (id, service) in new_config.services.iter() {
+                services.entry(*id).or_insert_with(|| ServiceState {
+                    name: service.name.clone(),
+                    description: service.description.clone(),
+                    state: State::Unknown,
+                    last_check: now,
+                    consecutive_failures: 0,
+                    total_checks: 0,
+                    successful_checks: 0,
+                    failed_checks: 0,
+                    uptime_start: None,
+                });
+
+                // Update name and description for existing services
+                if let Some(service_state) = services.get_mut(id) {
+                    service_state.name = service.name.clone();
+                    service_state.description = service.description.clone();
+                }
+            }
+        }
+
+        // Start new tasks
+        self.start_monitoring_tasks().await;
+
+        tracing::info!("Configuration updated and tasks restarted");
+        Ok(())
     }
 }

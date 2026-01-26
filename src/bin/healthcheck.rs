@@ -1,10 +1,7 @@
 use std::path::Path;
 use tracing_subscriber::prelude::*;
 
-mod config;
-mod web;
-
-use config::{AppState, Config};
+use healthcheck::{AppState, Config};
 
 const CONFIG_ENV: &str = "HEALTHCHECK_CONFIG";
 const CONFIG_VAL: &str = "healthcheck.yaml";
@@ -33,40 +30,20 @@ async fn main() -> anyhow::Result<()> {
     let app_state = AppState::new(config.clone());
 
     // Start service monitoring tasks
-    let mut handles = vec![];
-
-    for (uuid, service) in config.services.iter() {
-        if !service.enabled {
-            tracing::info!("Service '{}' is disabled, skipping", service.name);
-            continue;
-        }
-
-        tracing::info!("Starting monitor for service '{}'", service.name);
-        let service_clone = service.clone();
-        let state_clone = app_state.clone();
-        let uuid_clone = *uuid;
-
-        let handle = tokio::spawn(async move {
-            service_clone.run(uuid_clone, state_clone).await;
-        });
-
-        handles.push(handle);
-    }
+    app_state.start_monitoring_tasks().await;
 
     // Start web server
     let web_port = config.web_port.unwrap_or(8080);
     let web_state = app_state.clone();
 
     let web_handle = tokio::spawn(async move {
-        if let Err(e) = web::start_server(web_state, web_port).await {
+        if let Err(e) = healthcheck::web::start_server(web_state, web_port).await {
             tracing::error!("Web server error: {}", e);
         }
     });
 
-    handles.push(web_handle);
-
-    // Wait for all tasks
-    futures::future::join_all(handles).await;
+    // Wait for web server (monitoring tasks run indefinitely in background)
+    web_handle.await?;
 
     Ok(())
 }

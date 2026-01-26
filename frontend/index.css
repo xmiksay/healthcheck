@@ -82,6 +82,30 @@ button:hover {
   background: #5a67d8;
 }
 
+button.config-btn {
+  background: #48bb78;
+}
+
+button.config-btn:hover {
+  background: #38a169;
+}
+
+button.save-btn {
+  background: #48bb78;
+}
+
+button.save-btn:hover {
+  background: #38a169;
+}
+
+button.cancel-btn {
+  background: #718096;
+}
+
+button.cancel-btn:hover {
+  background: #4a5568;
+}
+
 label {
   display: flex;
   align-items: center;
@@ -102,6 +126,80 @@ input[type="checkbox"] {
   border-radius: 6px;
   margin-bottom: 20px;
   border-left: 4px solid #fc8181;
+}
+
+.config-editor {
+  background: #f7fafc;
+  border-radius: 8px;
+  padding: 25px;
+  margin-bottom: 25px;
+  border: 2px solid #e2e8f0;
+}
+
+.config-editor h2 {
+  color: #2d3748;
+  margin-bottom: 20px;
+  font-size: 24px;
+}
+
+.config-error {
+  background: #fed7d7;
+  color: #742a2a;
+  padding: 12px 15px;
+  border-radius: 6px;
+  margin-bottom: 15px;
+  border-left: 4px solid #fc8181;
+  font-weight: 500;
+}
+
+.config-success {
+  background: #c6f6d5;
+  color: #22543d;
+  padding: 12px 15px;
+  border-radius: 6px;
+  margin-bottom: 15px;
+  border-left: 4px solid #48bb78;
+  font-weight: 500;
+}
+
+.config-help {
+  background: #bee3f8;
+  color: #2c5282;
+  padding: 12px 15px;
+  border-radius: 6px;
+  margin-bottom: 15px;
+  border-left: 4px solid #4299e1;
+}
+
+.config-help p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.config-textarea {
+  width: 100%;
+  min-height: 400px;
+  font-family: 'Courier New', Consolas, Monaco, monospace;
+  font-size: 13px;
+  padding: 15px;
+  border: 2px solid #cbd5e0;
+  border-radius: 6px;
+  resize: vertical;
+  margin-bottom: 15px;
+  background: white;
+  color: #2d3748;
+  line-height: 1.6;
+}
+
+.config-textarea:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.config-buttons {
+  display: flex;
+  gap: 10px;
 }
 
 .services-table {
@@ -226,6 +324,36 @@ input[type="checkbox"] {
   .stats {
     flex-direction: column;
     gap: 10px;
+  }
+
+  .controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .controls button {
+    width: 100%;
+  }
+
+  .config-editor {
+    padding: 15px;
+  }
+
+  .config-editor h2 {
+    font-size: 20px;
+  }
+
+  .config-textarea {
+    min-height: 300px;
+    font-size: 12px;
+  }
+
+  .config-buttons {
+    flex-direction: column;
+  }
+
+  .config-buttons button {
+    width: 100%;
   }
 
   .services-table {

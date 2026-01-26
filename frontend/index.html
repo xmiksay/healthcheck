@@ -21,10 +21,39 @@
 
       <div class="controls">
         <button ng-click="healthCheck.refresh()">Refresh Now</button>
+        <button ng-click="healthCheck.toggleConfigEditor()" class="config-btn">
+          {{healthCheck.showConfigEditor ? 'Hide' : 'Edit'}} Configuration
+        </button>
         <label>
           <input type="checkbox" ng-model="healthCheck.autoRefresh">
           Auto-refresh every 5 seconds
         </label>
+      </div>
+
+      <div class="config-editor" ng-if="healthCheck.showConfigEditor">
+        <h2>Configuration Editor</h2>
+
+        <div class="config-error" ng-if="healthCheck.configError">
+          {{healthCheck.configError}}
+        </div>
+
+        <div class="config-success" ng-if="healthCheck.configSuccess">
+          {{healthCheck.configSuccess}}
+        </div>
+
+        <div class="config-help">
+          <p><strong>Note:</strong> Edit the JSON configuration below. Changes will restart all monitoring tasks.</p>
+        </div>
+
+        <textarea
+          ng-model="healthCheck.configJson"
+          class="config-textarea"
+          placeholder="Loading configuration..."></textarea>
+
+        <div class="config-buttons">
+          <button ng-click="healthCheck.saveConfig()" class="save-btn">Save Configuration</button>
+          <button ng-click="healthCheck.cancelConfigEdit()" class="cancel-btn">Cancel</button>
+        </div>
       </div>
 
       <div class="error" ng-if="healthCheck.error">

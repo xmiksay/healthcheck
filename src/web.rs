@@ -27,6 +27,26 @@ async fn get_config(State(state): State<AppState>) -> Json<Config> {
     Json(config)
 }
 
+// Handler for updating configuration
+async fn update_config(
+    State(state): State<AppState>,
+    Json(new_config): Json<Config>,
+) -> Result<(StatusCode, &'static str), (StatusCode, String)> {
+    match state.update_config(new_config).await {
+        Ok(_) => {
+            tracing::info!("Configuration updated successfully via API");
+            Ok((StatusCode::OK, "Configuration updated successfully"))
+        }
+        Err(e) => {
+            tracing::error!("Failed to update configuration: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to update configuration: {}", e),
+            ))
+        }
+    }
+}
+
 // Create the web server router
 pub fn create_router(app_state: AppState) -> Router {
     // Configure CORS to allow requests from any origin
@@ -37,7 +57,7 @@ pub fn create_router(app_state: AppState) -> Router {
 
     Router::new()
         .route("/api/services", get(get_services))
-        .route("/api/config", get(get_config))
+        .route("/api/config", get(get_config).put(update_config))
         .route("/api/health", get(health_check))
         .nest_service("/", ServeDir::new("frontend"))
         .layer(cors)

@@ -4,6 +4,7 @@ angular.module('healthCheckApp', [])
 
     // Configuration
     var API_URL = '/api/services';
+    var CONFIG_URL = '/api/config';
     var REFRESH_INTERVAL = 5000; // 5 seconds
 
     // State
@@ -11,6 +12,11 @@ angular.module('healthCheckApp', [])
     healthCheck.error = null;
     healthCheck.lastUpdate = null;
     healthCheck.autoRefresh = true;
+    healthCheck.showConfigEditor = false;
+    healthCheck.config = null;
+    healthCheck.configJson = '';
+    healthCheck.configError = null;
+    healthCheck.configSuccess = null;
     var refreshTimer = null;
 
     // Load services from API
@@ -30,6 +36,73 @@ angular.module('healthCheckApp', [])
     // Manual refresh
     healthCheck.refresh = function() {
       healthCheck.loadServices();
+    };
+
+    // Load configuration from API
+    healthCheck.loadConfig = function() {
+      $http.get(CONFIG_URL)
+        .then(function(response) {
+          healthCheck.config = response.data;
+          healthCheck.configJson = JSON.stringify(response.data, null, 2);
+          healthCheck.configError = null;
+        })
+        .catch(function(error) {
+          healthCheck.configError = 'Failed to load configuration: ' + (error.statusText || error.message);
+          console.error('Error loading config:', error);
+        });
+    };
+
+    // Toggle configuration editor
+    healthCheck.toggleConfigEditor = function() {
+      healthCheck.showConfigEditor = !healthCheck.showConfigEditor;
+      if (healthCheck.showConfigEditor && !healthCheck.config) {
+        healthCheck.loadConfig();
+      }
+      healthCheck.configError = null;
+      healthCheck.configSuccess = null;
+    };
+
+    // Save configuration
+    healthCheck.saveConfig = function() {
+      healthCheck.configError = null;
+      healthCheck.configSuccess = null;
+
+      // Validate JSON
+      var newConfig;
+      try {
+        newConfig = JSON.parse(healthCheck.configJson);
+      } catch (e) {
+        healthCheck.configError = 'Invalid JSON: ' + e.message;
+        return;
+      }
+
+      // Send to API
+      $http.put(CONFIG_URL, newConfig)
+        .then(function(response) {
+          healthCheck.configSuccess = 'Configuration updated successfully! Services are restarting...';
+          healthCheck.config = newConfig;
+
+          // Reload services after a short delay
+          $timeout(function() {
+            healthCheck.loadServices();
+            healthCheck.showConfigEditor = false;
+            healthCheck.configSuccess = null;
+          }, 2000);
+        })
+        .catch(function(error) {
+          healthCheck.configError = 'Failed to update configuration: ' + (error.data || error.statusText || error.message);
+          console.error('Error updating config:', error);
+        });
+    };
+
+    // Cancel config editing
+    healthCheck.cancelConfigEdit = function() {
+      healthCheck.showConfigEditor = false;
+      healthCheck.configError = null;
+      healthCheck.configSuccess = null;
+      if (healthCheck.config) {
+        healthCheck.configJson = JSON.stringify(healthCheck.config, null, 2);
+      }
     };
 
     // Count services by state
