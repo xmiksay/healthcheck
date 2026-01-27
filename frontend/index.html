@@ -1,28 +1,284 @@
 <!doctype html>
-<html ng-app="todoApp">
+<html ng-app="healthCheckApp">
   <head>
+    <meta charset="utf-8">
+    <title>Service Health Monitor</title>
     <script src="./angular.js"></script>
     <script src="./index.js"></script>
     <link rel="stylesheet" href="index.css">
   </head>
-  <body>
-    <h2>Todo</h2>
-    <div ng-controller="TodoListController as todoList">
-      <span>{{todoList.remaining()}} of {{todoList.todos.length}} remaining</span>
-      [ <a href="" ng-click="todoList.archive()">archive</a> ]
-      <ul class="unstyled">
-        <li ng-repeat="todo in todoList.todos">
-          <label class="checkbox">
-            <input type="checkbox" ng-model="todo.done">
-            <span class="done-{{todo.done}}">{{todo.text}}</span>
-          </label>
-        </li>
-      </ul>
-      <form ng-submit="todoList.addTodo()">
-        <input type="text" ng-model="todoList.todoText"  size="30"
-               placeholder="add new todo here">
-        <input class="btn-primary" type="submit" value="add">
-      </form>
+  <body ng-controller="HealthCheckController as healthCheck">
+    <div class="container">
+      <h1>Service Health Monitor</h1>
+
+      <div class="stats">
+        <span class="stat">Total: {{healthCheck.services.length}}</span>
+        <span class="stat success">Success: {{healthCheck.countByState('Success')}}</span>
+        <span class="stat failure">Failure: {{healthCheck.countByState('Failure')}}</span>
+        <span class="stat unknown">Unknown: {{healthCheck.countByState('Unknown')}}</span>
+        <span class="stat">Last updated: {{healthCheck.lastUpdate | date:'HH:mm:ss'}}</span>
+      </div>
+
+      <div class="controls">
+        <button ng-click="healthCheck.refresh()">Refresh Now</button>
+        <button ng-click="healthCheck.toggleConfigEditor()" class="config-btn">
+          {{healthCheck.showConfigEditor ? 'Hide' : 'Edit'}} Configuration
+        </button>
+        <label>
+          <input type="checkbox" ng-model="healthCheck.autoRefresh">
+          Auto-refresh every 5 seconds
+        </label>
+      </div>
+
+      <div class="config-editor" ng-if="healthCheck.showConfigEditor">
+        <h2>Configuration Editor</h2>
+
+        <div class="config-error" ng-if="healthCheck.configError">
+          {{healthCheck.configError}}
+        </div>
+
+        <div class="config-success" ng-if="healthCheck.configSuccess">
+          {{healthCheck.configSuccess}}
+        </div>
+
+        <!-- Bearer Token Prompt -->
+        <div class="bearer-prompt" ng-if="healthCheck.showBearerPrompt">
+          <h3>Authentication Required</h3>
+          <p>This configuration is protected. Please enter the bearer token:</p>
+          <div class="bearer-input-group">
+            <input type="password" ng-model="healthCheck.bearerToken" placeholder="Enter bearer token" class="bearer-input">
+            <button ng-click="healthCheck.saveBearerToken()" class="bearer-btn">Submit</button>
+            <button ng-click="healthCheck.clearBearerToken()" class="bearer-btn cancel">Clear</button>
+          </div>
+        </div>
+
+        <div class="config-tabs">
+          <button
+            ng-click="healthCheck.configEditorMode = 'visual'"
+            ng-class="{active: healthCheck.configEditorMode === 'visual'}"
+            class="tab-btn">
+            Visual Editor
+          </button>
+          <button
+            ng-click="healthCheck.configEditorMode = 'raw'"
+            ng-class="{active: healthCheck.configEditorMode === 'raw'}"
+            class="tab-btn">
+            Raw Editor
+          </button>
+        </div>
+
+        <!-- Visual Editor -->
+        <div ng-if="healthCheck.configEditorMode === 'visual'" class="visual-editor">
+          <div class="config-help">
+            <p><strong>Note:</strong> Edit the configuration using the form below. Changes will restart all monitoring tasks.</p>
+          </div>
+
+          <!-- Global Settings -->
+          <div class="config-section">
+            <h3>Global Settings</h3>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Telegram Bot Token:</label>
+                <input type="text" ng-model="healthCheck.editConfig.telegram_token" placeholder="Bot token">
+              </div>
+              <div class="form-group">
+                <label>Telegram Chat ID:</label>
+                <input type="number" ng-model="healthCheck.editConfig.telegram_chat_id" placeholder="Chat ID">
+              </div>
+              <div class="form-group">
+                <label>Check Interval Success (ms):</label>
+                <input type="number" ng-model="healthCheck.editConfig.check_interval_success" placeholder="10000">
+              </div>
+              <div class="form-group">
+                <label>Check Interval Fail (ms):</label>
+                <input type="number" ng-model="healthCheck.editConfig.check_interval_fail" placeholder="10000">
+              </div>
+              <div class="form-group">
+                <label>Notify After Failures:</label>
+                <input type="number" ng-model="healthCheck.editConfig.notify_failures" placeholder="3">
+              </div>
+              <div class="form-group">
+                <label>Rereport Every N Failures:</label>
+                <input type="number" ng-model="healthCheck.editConfig.rereport" placeholder="10">
+              </div>
+              <div class="form-group">
+                <label>Web Port:</label>
+                <input type="number" ng-model="healthCheck.editConfig.web_port" placeholder="8080">
+              </div>
+            </div>
+          </div>
+
+          <!-- Services -->
+          <div class="config-section">
+            <h3>Services</h3>
+            <button ng-click="healthCheck.addNewService()" class="add-service-btn">+ Add New Service</button>
+
+            <div class="services-list">
+              <div ng-repeat="(uuid, service) in healthCheck.editConfig.services" class="service-editor">
+                <div class="service-header">
+                  <h4>{{service.name || 'New Service'}}</h4>
+                  <button ng-click="healthCheck.removeService(uuid)" class="delete-service-btn">Delete</button>
+                </div>
+
+                <div class="form-grid">
+                  <div class="form-group">
+                    <label>Enabled:</label>
+                    <input type="checkbox" ng-model="service.enabled">
+                  </div>
+                  <div class="form-group">
+                    <label>Name:</label>
+                    <input type="text" ng-model="service.name" placeholder="Service name">
+                  </div>
+                  <div class="form-group full-width">
+                    <label>Description:</label>
+                    <input type="text" ng-model="service.description" placeholder="Service description">
+                  </div>
+                  <div class="form-group">
+                    <label>Check Type:</label>
+                    <select ng-model="service.checkType" ng-change="healthCheck.updateCheckType(service)">
+                      <option value="http">HTTP</option>
+                      <option value="certificate">Certificate</option>
+                      <option value="tcpPing">TCP Ping</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- HTTP Check -->
+                <div ng-if="service.checkType === 'http'" class="check-config">
+                  <h5>HTTP Check Configuration</h5>
+                  <div class="form-grid">
+                    <div class="form-group full-width">
+                      <label>URL:</label>
+                      <input type="text" ng-model="service.check.http.url" placeholder="https://example.com">
+                    </div>
+                    <div class="form-group">
+                      <label>Expected Status Code:</label>
+                      <input type="number" ng-model="service.check.http.expected_status" placeholder="200">
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Certificate Check -->
+                <div ng-if="service.checkType === 'certificate'" class="check-config">
+                  <h5>Certificate Check Configuration</h5>
+                  <div class="form-grid">
+                    <div class="form-group">
+                      <label>Host:</label>
+                      <input type="text" ng-model="service.check.certificate.host" placeholder="example.com">
+                    </div>
+                    <div class="form-group">
+                      <label>Port:</label>
+                      <input type="number" ng-model="service.check.certificate.port" placeholder="443">
+                    </div>
+                    <div class="form-group">
+                      <label>Days Before Expiry:</label>
+                      <input type="number" ng-model="service.check.certificate.days_before_expiry" placeholder="30">
+                    </div>
+                  </div>
+                </div>
+
+                <!-- TCP Ping Check -->
+                <div ng-if="service.checkType === 'tcpPing'" class="check-config">
+                  <h5>TCP Ping Configuration</h5>
+                  <div class="form-grid">
+                    <div class="form-group">
+                      <label>Host:</label>
+                      <input type="text" ng-model="service.check.tcpPing.host" placeholder="localhost">
+                    </div>
+                    <div class="form-group">
+                      <label>Port:</label>
+                      <input type="number" ng-model="service.check.tcpPing.port" placeholder="8080">
+                    </div>
+                    <div class="form-group">
+                      <label>Timeout (ms):</label>
+                      <input type="number" ng-model="service.check.tcpPing.timeout_ms" placeholder="3000">
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Optional Intervals -->
+                <div class="advanced-options">
+                  <button ng-click="service.showAdvanced = !service.showAdvanced" class="toggle-advanced-btn">
+                    {{service.showAdvanced ? '▼' : '▶'}} Advanced Options
+                  </button>
+                  <div ng-if="service.showAdvanced" class="form-grid">
+                    <div class="form-group">
+                      <label>Check Interval Success (ms):</label>
+                      <input type="number" ng-model="service.check_interval_success" placeholder="Use global">
+                    </div>
+                    <div class="form-group">
+                      <label>Check Interval Fail (ms):</label>
+                      <input type="number" ng-model="service.check_interval_fail" placeholder="Use global">
+                    </div>
+                    <div class="form-group">
+                      <label>Notify After Failures:</label>
+                      <input type="number" ng-model="service.notify_failures" placeholder="Use global">
+                    </div>
+                    <div class="form-group">
+                      <label>Rereport Every N Failures:</label>
+                      <input type="number" ng-model="service.rereport" placeholder="Use global">
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Raw Editor -->
+        <div ng-if="healthCheck.configEditorMode === 'raw'" class="raw-editor">
+          <div class="config-help">
+            <p><strong>Note:</strong> Edit the YAML configuration below. Changes will restart all monitoring tasks.</p>
+          </div>
+
+          <textarea
+            ng-model="healthCheck.configJson"
+            class="config-textarea"
+            placeholder="Loading configuration..."></textarea>
+        </div>
+
+        <div class="config-buttons">
+          <button ng-click="healthCheck.saveConfig()" class="save-btn">Save Configuration</button>
+          <button ng-click="healthCheck.cancelConfigEdit()" class="cancel-btn">Cancel</button>
+        </div>
+      </div>
+
+      <div class="error" ng-if="healthCheck.error">
+        Error loading services: {{healthCheck.error}}
+      </div>
+
+      <table class="services-table">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Name</th>
+            <th>Description</th>
+            <th>Uptime</th>
+            <th>Last Check</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr ng-repeat="service in healthCheck.services"
+              class="service-row state-{{healthCheck.getStateClass(service.state)}}">
+            <td class="status-cell">
+              <span class="status-indicator status-{{healthCheck.getStateClass(service.state)}}">
+                {{healthCheck.getStateLabel(service.state)}}
+              </span>
+            </td>
+            <td class="name-cell">{{service.name}}</td>
+            <td class="description-cell">{{service.description}}</td>
+            <td class="uptime-cell">
+              <span ng-if="service.uptime_start">{{healthCheck.getUptime(service.uptime_start)}}</span>
+              <span ng-if="!service.uptime_start" class="no-uptime">-</span>
+            </td>
+            <td class="time-cell">{{service.last_check | date:'yyyy-MM-dd HH:mm:ss'}}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div ng-if="healthCheck.services.length === 0 && !healthCheck.error" class="no-services">
+        No services configured
+      </div>
     </div>
   </body>
 </html>

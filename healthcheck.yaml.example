@@ -1,0 +1,124 @@
+# Healthcheck Service Monitor Configuration
+
+# Telegram notification settings (required)
+telegram_token: "YOUR_TELEGRAM_BOT_TOKEN"
+telegram_chat_id: 123456789
+
+# Global defaults (in milliseconds)
+check_interval_success: 60000  # Check every 60 seconds when service is healthy
+check_interval_fail: 10000     # Check every 10 seconds when service fails
+notify_failures: 3             # Notify after 3 consecutive failures
+rereport: 10                   # Re-notify every 10 failures
+
+# Web server port for frontend and API
+web_port: 8080
+
+# Optional: Bearer token for API authentication
+# If set, /api/config endpoint will require this token in Authorization header
+# api_bearer_token: "your-secret-token-here"
+
+# Services to monitor
+# Each service must have a unique identifier (can be any string)
+services:
+  # Example 1: HTTP health check
+  example-website:
+    enabled: true
+    name: "Example Website"
+    description: "Main company website health check"
+    check_interval_success: 30000  # Optional: override global setting
+    check_interval_fail: 5000      # Optional: override global setting
+    check: !http
+      url: "https://example.com"
+      expected_status: 200
+
+  # Example 2: API endpoint (uses global intervals)
+  api-health:
+    enabled: true
+    name: "API Health Endpoint"
+    description: "REST API health status"
+    check: !http
+      url: "https://api.example.com/health"
+      expected_status: 200
+
+  # Example 3: Google homepage
+  google-homepage:
+    enabled: true
+    name: "Google"
+    description: "Google homepage availability"
+    check: !http
+      url: "https://www.google.com"
+
+  # Example 4: TCP connectivity check (database)
+  postgresql-db:
+    enabled: true
+    name: "PostgreSQL Database"
+    description: "PostgreSQL database connectivity"
+    check: !tcpPing
+      host: "localhost"
+      port: 5432
+      timeout_ms: 5000  # Optional, defaults to 1000ms
+
+  # Example 5: Redis cache
+  redis-cache:
+    enabled: true
+    name: "Redis Cache"
+    description: "Redis server connectivity"
+    check: !tcpPing
+      host: "localhost"
+      port: 6379
+      # timeout_ms omitted - will use default 1000ms
+
+  # Example 6: SSH server (disabled)
+  ssh-server:
+    enabled: false
+    name: "SSH Server"
+    description: "SSH server availability"
+    check: !tcpPing
+      host: "example.com"
+      port: 22
+      # timeout_ms omitted - will use default 1000ms
+
+  # Example 7: SSL Certificate expiration check
+  ssl-cert-example:
+    enabled: true
+    name: "SSL Certificate"
+    description: "Monitor SSL certificate expiration for example.com"
+    check_interval_success: 86400000  # Check once per day (24 hours)
+    check: !certificate
+      host: "example.com"
+      port: 443
+      days_before_expiry: 30  # Optional, defaults to 30 days
+
+  # Example 8: Another certificate check
+  api-ssl-cert:
+    enabled: false
+    name: "API SSL Certificate"
+    description: "Monitor API SSL certificate"
+    check: !certificate
+      host: "api.example.com"
+      port: 443
+      # days_before_expiry omitted - will use default 30 days
+
+# Service-level optional overrides (any can be omitted to use global defaults):
+#   check_interval_success: milliseconds  # Override check interval when healthy
+#   check_interval_fail: milliseconds     # Override check interval when failing
+#   notify_failures: number               # Override failure threshold for notifications
+#   rereport: number                      # Override rereport interval
+
+# Check types:
+#   !http          - HTTP/HTTPS endpoint monitoring
+#     - url: string (required)
+#     - expected_status: number (optional, default: 200)
+#
+#   !tcpPing       - TCP connectivity check
+#     - host: string (required)
+#     - port: number (required)
+#     - timeout_ms: number (optional, default: 1000)
+#
+#   !certificate   - SSL certificate expiration monitoring
+#     - host: string (required)
+#     - port: number (required)
+#     - days_before_expiry: number (optional, default: 30)
+
+# Service identifiers can be any unique string (e.g., "my-service", "prod-api", "db-primary")
+# Use the "Add New Service" button in the web UI for automatic ID generation
