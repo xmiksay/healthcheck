@@ -256,6 +256,8 @@ pub struct Config {
     pub rereport: u64,
     pub services: HashMap<String, Service>,
     pub web_port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_bearer_token: Option<String>,
 }
 
 impl Config {

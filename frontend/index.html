@@ -41,6 +41,17 @@
           {{healthCheck.configSuccess}}
         </div>
 
+        <!-- Bearer Token Prompt -->
+        <div class="bearer-prompt" ng-if="healthCheck.showBearerPrompt">
+          <h3>Authentication Required</h3>
+          <p>This configuration is protected. Please enter the bearer token:</p>
+          <div class="bearer-input-group">
+            <input type="password" ng-model="healthCheck.bearerToken" placeholder="Enter bearer token" class="bearer-input">
+            <button ng-click="healthCheck.saveBearerToken()" class="bearer-btn">Submit</button>
+            <button ng-click="healthCheck.clearBearerToken()" class="bearer-btn cancel">Clear</button>
+          </div>
+        </div>
+
         <div class="config-tabs">
           <button
             ng-click="healthCheck.configEditorMode = 'visual'"

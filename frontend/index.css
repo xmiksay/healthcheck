@@ -578,3 +578,65 @@ input[type="checkbox"] {
     font-size: 24px;
   }
 }
+
+/* Bearer Token Prompt */
+.bearer-prompt {
+  background: #fff3cd;
+  border: 2px solid #ffc107;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.bearer-prompt h3 {
+  color: #856404;
+  margin-bottom: 10px;
+  font-size: 18px;
+}
+
+.bearer-prompt p {
+  color: #856404;
+  margin-bottom: 15px;
+}
+
+.bearer-input-group {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.bearer-input {
+  flex: 1;
+  padding: 10px;
+  border: 2px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.bearer-input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.bearer-btn {
+  padding: 10px 20px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+
+.bearer-btn:hover {
+  background: #5a67d8;
+}
+
+.bearer-btn.cancel {
+  background: #e53e3e;
+}
+
+.bearer-btn.cancel:hover {
+  background: #c53030;
+}

@@ -19,7 +19,36 @@ angular.module('healthCheckApp', [])
     healthCheck.configJson = '';
     healthCheck.configError = null;
     healthCheck.configSuccess = null;
+    healthCheck.showBearerPrompt = false;
+    healthCheck.bearerToken = '';
     var refreshTimer = null;
+
+    // Get bearer token from localStorage
+    function getBearerToken() {
+      return localStorage.getItem('healthcheck_bearer_token') || '';
+    }
+
+    // Set bearer token in localStorage
+    function setBearerToken(token) {
+      if (token) {
+        localStorage.setItem('healthcheck_bearer_token', token);
+      } else {
+        localStorage.removeItem('healthcheck_bearer_token');
+      }
+    }
+
+    // Get HTTP config with auth header if bearer token exists
+    function getHttpConfig() {
+      var token = getBearerToken();
+      if (token) {
+        return {
+          headers: {
+            'Authorization': 'Bearer ' + token
+          }
+        };
+      }
+      return {};
+    }
 
     // Load services from API
     healthCheck.loadServices = function() {
@@ -42,15 +71,21 @@ angular.module('healthCheckApp', [])
 
     // Load configuration from API
     healthCheck.loadConfig = function() {
-      $http.get(CONFIG_URL)
+      $http.get(CONFIG_URL, getHttpConfig())
         .then(function(response) {
           healthCheck.config = response.data;
           healthCheck.configJson = JSON.stringify(response.data, null, 2);
           healthCheck.editConfig = healthCheck.parseConfigForVisualEditor(response.data);
           healthCheck.configError = null;
+          healthCheck.showBearerPrompt = false;
         })
         .catch(function(error) {
-          healthCheck.configError = 'Failed to load configuration: ' + (error.statusText || error.message);
+          if (error.status === 401) {
+            healthCheck.showBearerPrompt = true;
+            healthCheck.configError = 'Authentication required. Please enter bearer token.';
+          } else {
+            healthCheck.configError = 'Failed to load configuration: ' + (error.statusText || error.message);
+          }
           console.error('Error loading config:', error);
         });
     };
@@ -236,6 +271,7 @@ angular.module('healthCheckApp', [])
     healthCheck.toggleConfigEditor = function() {
       healthCheck.showConfigEditor = !healthCheck.showConfigEditor;
       if (healthCheck.showConfigEditor && !healthCheck.config) {
+        healthCheck.bearerToken = getBearerToken();
         healthCheck.loadConfig();
       }
       healthCheck.configError = null;
@@ -268,10 +304,11 @@ angular.module('healthCheckApp', [])
       }
 
       // Send to API
-      $http.put(CONFIG_URL, newConfig)
+      $http.put(CONFIG_URL, newConfig, getHttpConfig())
         .then(function() {
           healthCheck.configSuccess = 'Configuration updated successfully! Services are restarting...';
           healthCheck.config = newConfig;
+          healthCheck.showBearerPrompt = false;
 
           // Reload services after a short delay
           $timeout(function() {
@@ -281,9 +318,28 @@ angular.module('healthCheckApp', [])
           }, 2000);
         })
         .catch(function(error) {
-          healthCheck.configError = 'Failed to update configuration: ' + (error.data || error.statusText || error.message);
+          if (error.status === 401) {
+            healthCheck.showBearerPrompt = true;
+            healthCheck.configError = 'Authentication failed. Please check your bearer token.';
+          } else {
+            healthCheck.configError = 'Failed to update configuration: ' + (error.data || error.statusText || error.message);
+          }
           console.error('Error updating config:', error);
         });
+    };
+
+    // Save bearer token
+    healthCheck.saveBearerToken = function() {
+      setBearerToken(healthCheck.bearerToken);
+      healthCheck.showBearerPrompt = false;
+      healthCheck.loadConfig();
+    };
+
+    // Clear bearer token
+    healthCheck.clearBearerToken = function() {
+      healthCheck.bearerToken = '';
+      setBearerToken('');
+      healthCheck.showBearerPrompt = false;
     };
 
     // Cancel config editing

@@ -106,6 +106,7 @@ services:
 - **notify_failures**: Consecutive failures before alert (default: 3)
 - **rereport**: Re-notify every N failures after initial alert (default: 10)
 - **web_port**: Web server port (default: 8080)
+- **api_bearer_token**: Optional bearer token for API authentication (default: none)
 
 #### Service Configuration
 
@@ -222,6 +223,23 @@ Both editors support:
 
 ## API Endpoints
 
+### Authentication
+
+The `/api/config` endpoints (GET and PUT) support optional bearer token authentication. When `api_bearer_token` is set in the configuration file, requests to these endpoints must include an `Authorization` header:
+
+```bash
+Authorization: Bearer your-secret-token-here
+```
+
+**Frontend**: The web dashboard automatically prompts for the bearer token when authentication is required and stores it in browser localStorage for subsequent requests.
+
+**CLI/API**: Include the bearer token in your requests:
+```bash
+curl -H "Authorization: Bearer your-secret-token-here" http://localhost:8080/api/config
+```
+
+**Note**: The `/api/services` and `/api/health` endpoints do not require authentication.
+
 ### GET /api/services
 Returns all monitored services with their current state.
 
@@ -256,7 +274,7 @@ Returns all monitored services with their current state.
 ```
 
 ### GET /api/config
-Returns current configuration.
+Returns current configuration. Requires bearer token authentication if `api_bearer_token` is configured.
 
 **Response:**
 ```json
@@ -273,7 +291,7 @@ Returns current configuration.
 ```
 
 ### PUT /api/config
-Update configuration (writes to configuration file and triggers service restart).
+Update configuration (writes to configuration file and triggers service restart). Requires bearer token authentication if `api_bearer_token` is configured.
 
 **Request:**
 ```json

@@ -13,6 +13,10 @@ rereport: 10                   # Re-notify every 10 failures
 # Web server port for frontend and API
 web_port: 8080
 
+# Optional: Bearer token for API authentication
+# If set, /api/config endpoint will require this token in Authorization header
+# api_bearer_token: "your-secret-token-here"
+
 # Services to monitor
 # Each service must have a unique identifier (can be any string)
 services:
