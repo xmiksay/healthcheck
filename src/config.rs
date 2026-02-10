@@ -74,8 +74,10 @@ impl ServiceCertificate {
     }
 
     async fn check_certificate(&self) -> State {
-        use native_tls::TlsConnector;
+        use rustls::pki_types::ServerName;
+        use std::sync::Arc;
         use tokio::net::TcpStream;
+        use tokio_rustls::TlsConnector;
 
         // Connect to the server
         let addr = format!("{}:{}", self.host, self.port);
@@ -84,29 +86,41 @@ impl ServiceCertificate {
             Err(e) => return State::Failure(format!("TCP connection failed: {}", e)),
         };
 
-        // Create TLS connector
-        let connector = match TlsConnector::new() {
-            Ok(c) => c,
-            Err(e) => return State::Failure(format!("Failed to create TLS connector: {}", e)),
+        // Create rustls config
+        let mut root_cert_store = rustls::RootCertStore::empty();
+        root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+        let config = rustls::ClientConfig::builder()
+            .with_root_certificates(root_cert_store)
+            .with_no_client_auth();
+
+        let connector = TlsConnector::from(Arc::new(config));
+
+        // Parse server name
+        let server_name = match ServerName::try_from(self.host.as_str()) {
+            Ok(name) => name.to_owned(),
+            Err(e) => return State::Failure(format!("Invalid DNS name: {}", e)),
         };
 
-        let connector = tokio_native_tls::TlsConnector::from(connector);
-
         // Perform TLS handshake
-        let tls_stream = match connector.connect(&self.host, tcp_stream).await {
+        let tls_stream = match connector.connect(server_name, tcp_stream).await {
             Ok(stream) => stream,
             Err(e) => return State::Failure(format!("TLS handshake failed: {}", e)),
         };
 
-        // Get the peer certificate
-        let cert = match tls_stream.get_ref().peer_certificate() {
-            Ok(Some(cert)) => cert,
-            Ok(None) => return State::Failure("No peer certificate found".to_string()),
-            Err(e) => return State::Failure(format!("Failed to get peer certificate: {}", e)),
+        // Get the peer certificates
+        let (_, connection) = tls_stream.get_ref();
+        let certs = match connection.peer_certificates() {
+            Some(certs) => certs,
+            None => return State::Failure("No peer certificates found".to_string()),
         };
 
-        // Parse the certificate to get expiration date
-        let der = cert.to_der().unwrap();
+        if certs.is_empty() {
+            return State::Failure("No peer certificates found".to_string());
+        }
+
+        // Parse the first certificate to get expiration date
+        let der = certs[0].as_ref();
         let (_, parsed_cert) = match x509_parser::parse_x509_certificate(&der) {
             Ok(result) => result,
             Err(e) => return State::Failure(format!("Failed to parse certificate: {}", e)),
@@ -124,7 +138,10 @@ impl ServiceCertificate {
         let threshold = self.days_before_expiry.unwrap_or(30);
 
         if days_until_expiry < 0 {
-            State::Failure(format!("Certificate expired {} days ago", -days_until_expiry))
+            State::Failure(format!(
+                "Certificate expired {} days ago",
+                -days_until_expiry
+            ))
         } else if days_until_expiry < threshold as i64 {
             State::Failure(format!(
                 "Certificate expires in {} days (threshold: {} days)",
@@ -208,8 +225,12 @@ impl Service {
             // Log the result
             match &state {
                 State::Success => tracing::info!("Service '{}' check succeeded", self.name),
-                State::Failure(reason) => tracing::warn!("Service '{}' check failed: {}", self.name, reason),
-                State::Unknown => tracing::info!("Service '{}' check returned unknown state", self.name),
+                State::Failure(reason) => {
+                    tracing::warn!("Service '{}' check failed: {}", self.name, reason)
+                }
+                State::Unknown => {
+                    tracing::info!("Service '{}' check returned unknown state", self.name)
+                }
             }
 
             // Update state in the global store
@@ -220,9 +241,15 @@ impl Service {
 
             // Determine sleep interval based on state, using service override or global default
             let interval = match &state {
-                State::Success => self.check_interval_success.unwrap_or(config.check_interval_success),
-                State::Failure(_) => self.check_interval_fail.unwrap_or(config.check_interval_fail),
-                State::Unknown => self.check_interval_success.unwrap_or(config.check_interval_success),
+                State::Success => self
+                    .check_interval_success
+                    .unwrap_or(config.check_interval_success),
+                State::Failure(_) => self
+                    .check_interval_fail
+                    .unwrap_or(config.check_interval_fail),
+                State::Unknown => self
+                    .check_interval_success
+                    .unwrap_or(config.check_interval_success),
             };
 
             tracing::debug!("Service '{}' next check in {}ms", self.name, interval);
@@ -256,6 +283,7 @@ pub struct Config {
     pub rereport: u64,
     pub services: HashMap<String, Service>,
     pub web_port: Option<u16>,
+    pub frontend_path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_bearer_token: Option<String>,
 }
@@ -336,9 +364,7 @@ impl AppState {
                 let notify_failures = service
                     .and_then(|s| s.notify_failures)
                     .unwrap_or(config.notify_failures);
-                let rereport = service
-                    .and_then(|s| s.rereport)
-                    .unwrap_or(config.rereport);
+                let rereport = service.and_then(|s| s.rereport).unwrap_or(config.rereport);
 
                 let notification = match &state {
                     State::Success => {
@@ -369,8 +395,14 @@ impl AppState {
                         }
                         // Resend alert at rereport intervals
                         else if service_state.consecutive_failures > notify_failures
-                            && (service_state.consecutive_failures - notify_failures) % rereport == 0 {
-                            Some((service_state.name.clone(), format!("{} (still failing)", reason), false))
+                            && (service_state.consecutive_failures - notify_failures) % rereport
+                                == 0
+                        {
+                            Some((
+                                service_state.name.clone(),
+                                format!("{} (still failing)", reason),
+                                false,
+                            ))
                         } else {
                             None
                         }
@@ -467,7 +499,9 @@ impl AppState {
 
             // Remove services that no longer exist or are now disabled
             services.retain(|id, _| {
-                new_config.services.get(id)
+                new_config
+                    .services
+                    .get(id)
                     .map(|s| s.enabled)
                     .unwrap_or(false)
             });

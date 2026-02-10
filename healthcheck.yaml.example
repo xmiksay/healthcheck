@@ -12,7 +12,8 @@ rereport: 10                   # Re-notify every 10 failures
 
 # Web server port for frontend and API
 web_port: 8080
-
+# Frontend path
+frontend_path: "./frontend"
 # Optional: Bearer token for API authentication
 # If set, /api/config endpoint will require this token in Authorization header
 # api_bearer_token: "your-secret-token-here"

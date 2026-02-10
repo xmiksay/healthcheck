@@ -1,10 +1,7 @@
 use std::path::Path;
 use tracing_subscriber::prelude::*;
 
-use healthcheck::{AppState, Config};
-
-const CONFIG_ENV: &str = "HEALTHCHECK_CONFIG";
-const CONFIG_VAL: &str = "healthcheck.yaml";
+use healthcheck::{AppState, Config, CONFIG_ENV, CONFIG_VAL};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -25,7 +22,11 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("Loaded configuration from {}", config_path);
     let enabled_count = config.services.values().filter(|s| s.enabled).count();
-    tracing::info!("Monitoring {} enabled services (total: {})", enabled_count, config.services.len());
+    tracing::info!(
+        "Monitoring {} enabled services (total: {})",
+        enabled_count,
+        config.services.len()
+    );
 
     // Create application state
     let app_state = AppState::new(config.clone(), config_path);

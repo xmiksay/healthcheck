@@ -1,16 +1,13 @@
-use std::path::Path;
 use clap::{Parser, Subcommand};
 use healthcheck::{Config, TelegramClient};
-
-const CONFIG_ENV: &str = "HEALTHCHECK_CONFIG";
-const CONFIG_VAL: &str = "healthcheck.yaml";
+use std::path::Path;
 
 #[derive(Parser)]
 #[command(name = "healthcheck_cli")]
 #[command(about = "Health check CLI tool for testing services and sending notifications")]
 struct Cli {
     /// Path to configuration file
-    #[arg(short, long, default_value = CONFIG_VAL)]
+    #[arg(short, long, default_value = healthcheck::CONFIG_VAL)]
     config: String,
 
     #[command(subcommand)]
@@ -44,15 +41,19 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     // Load configuration - check environment variable first
-    let config_path = if cli.config == CONFIG_VAL {
-        std::env::var(CONFIG_ENV).unwrap_or_else(|_| CONFIG_VAL.to_string())
+    let config_path = if cli.config == healthcheck::CONFIG_VAL {
+        std::env::var(healthcheck::CONFIG_ENV)
+            .unwrap_or_else(|_| healthcheck::CONFIG_VAL.to_string())
     } else {
         cli.config
     };
     let config = Config::load(Path::new(&config_path))?;
 
     match &cli.command {
-        Commands::Telegram { message_type, message } => {
+        Commands::Telegram {
+            message_type,
+            message,
+        } => {
             handle_telegram_command(&config, message_type, message).await?;
         }
         Commands::TestService { id } => {
@@ -68,10 +69,7 @@ async fn handle_telegram_command(
     message_type: &str,
     message: &str,
 ) -> anyhow::Result<()> {
-    let telegram = TelegramClient::new(
-        config.telegram_token.clone(),
-        config.telegram_chat_id,
-    );
+    let telegram = TelegramClient::new(config.telegram_token.clone(), config.telegram_chat_id);
 
     match message_type {
         "success" => {
@@ -90,10 +88,7 @@ async fn handle_telegram_command(
     Ok(())
 }
 
-async fn handle_test_service_command(
-    config: &Config,
-    id: &str,
-) -> anyhow::Result<()> {
+async fn handle_test_service_command(config: &Config, id: &str) -> anyhow::Result<()> {
     // Find service in config
     let service = config
         .services

@@ -1,7 +1,7 @@
 use axum::{
     async_trait,
     extract::{FromRequestParts, State},
-    http::{StatusCode, request::Parts},
+    http::{request::Parts, StatusCode},
     response::Json,
     routing::get,
     Router,
@@ -9,7 +9,7 @@ use axum::{
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
 
-use crate::config::{AppState, ServiceState, Config};
+use crate::config::{AppState, Config, ServiceState};
 
 // Bearer token extractor for authentication
 pub struct BearerToken(pub String);
@@ -31,7 +31,10 @@ where
         if let Some(token) = auth_header.strip_prefix("Bearer ") {
             Ok(BearerToken(token.to_string()))
         } else {
-            Err((StatusCode::UNAUTHORIZED, "Invalid Authorization header format"))
+            Err((
+                StatusCode::UNAUTHORIZED,
+                "Invalid Authorization header format",
+            ))
         }
     }
 }
@@ -95,7 +98,7 @@ async fn update_config(
 }
 
 // Create the web server router
-pub fn create_router(app_state: AppState) -> Router {
+pub fn create_router(app_state: AppState, frontend_path: &str) -> Router {
     // Configure CORS to allow requests from any origin
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -106,14 +109,15 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/api/services", get(get_services))
         .route("/api/config", get(get_config).put(update_config))
         .route("/api/health", get(health_check))
-        .nest_service("/", ServeDir::new("frontend"))
+        .nest_service("/", ServeDir::new(frontend_path))
         .layer(cors)
         .with_state(app_state)
 }
 
 // Start the web server
 pub async fn start_server(app_state: AppState, port: u16) -> anyhow::Result<()> {
-    let app = create_router(app_state);
+    let frontend_path = app_state.get_config().await.frontend_path.clone();
+    let app = create_router(app_state, &frontend_path);
     let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 

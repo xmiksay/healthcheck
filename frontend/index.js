@@ -100,6 +100,8 @@ angular.module('healthCheckApp', [])
         notify_failures: config.notify_failures,
         rereport: config.rereport,
         web_port: config.web_port,
+        frontend_path: config.frontend_path,
+        api_bearer_token: config.api_bearer_token,
         services: {}
       };
 
@@ -157,6 +159,8 @@ angular.module('healthCheckApp', [])
         notify_failures: healthCheck.editConfig.notify_failures,
         rereport: healthCheck.editConfig.rereport,
         web_port: healthCheck.editConfig.web_port,
+        frontend_path: healthCheck.editConfig.frontend_path,
+        api_bearer_token: healthCheck.editConfig.api_bearer_token,
         services: {}
       };
 

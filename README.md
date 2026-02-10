@@ -428,7 +428,7 @@ Key Rust crates:
 - **uuid** (1.19.0) - UUID handling
 - **chrono** (0.4.39) - Date/time handling
 - **clap** (4.5) - CLI argument parsing
-- **native-tls** / **tokio-native-tls** - TLS support
+- **rustls** / **tokio-rustls** - TLS support
 - **x509-parser** (0.16) - Certificate parsing
 - **tracing** / **tracing-subscriber** - Logging
 

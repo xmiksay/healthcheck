@@ -19,7 +19,8 @@ axum = "0.7.9"
 tower-http = { version = "0.6.2", features = ["cors", "fs"] }
 tokio-util = "0.7.14"
 chrono = { version = "0.4.39", features = ["serde"] }
-tokio-native-tls = "0.3"
-native-tls = "0.2"
 x509-parser = "0.16"
 clap = { version = "4.5", features = ["derive"] }
+rustls = { version = "0.23.36", features = ["ring"] }
+tokio-rustls = "0.26.4"
+webpki-roots = "1.0.6"
