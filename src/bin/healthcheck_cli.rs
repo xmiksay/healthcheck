@@ -35,6 +35,11 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Install ring as the rustls crypto provider before any TLS usage.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     // Initialize basic tracing
     tracing_subscriber::fmt::init();
 
@@ -73,11 +78,11 @@ async fn handle_telegram_command(
 
     match message_type {
         "success" => {
-            telegram.send_recovery("CLI", message).await?;
+            telegram.send_recovery(config.telegram_chat_id, "CLI", message).await?;
             println!("Success message sent to Telegram");
         }
         "error" => {
-            telegram.send_alert("CLI", message).await?;
+            telegram.send_alert(config.telegram_chat_id, "CLI", message).await?;
             println!("Error message sent to Telegram");
         }
         _ => {

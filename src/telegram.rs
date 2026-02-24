@@ -24,16 +24,16 @@ impl TelegramClient {
         }
     }
 
-    pub async fn send_message(&self, text: &str) -> anyhow::Result<()> {
+    async fn send_message_to(&self, chat_id: i64, text: &str) -> anyhow::Result<()> {
         let url = format!("https://api.telegram.org/bot{}/sendMessage", self.bot_token);
 
         let request = SendMessageRequest {
-            chat_id: self.chat_id,
+            chat_id,
             text: text.to_string(),
             parse_mode: Some("HTML".to_string()),
         };
 
-        tracing::debug!("Sending Telegram message to chat_id: {}", self.chat_id);
+        tracing::debug!("Sending Telegram message to chat_id: {}", chat_id);
 
         let response = self.client
             .post(&url)
@@ -52,22 +52,26 @@ impl TelegramClient {
         }
     }
 
-    pub async fn send_alert(&self, service_name: &str, message: &str) -> anyhow::Result<()> {
+    pub async fn send_message(&self, text: &str) -> anyhow::Result<()> {
+        self.send_message_to(self.chat_id, text).await
+    }
+
+    pub async fn send_alert(&self, chat_id: i64, service_name: &str, message: &str) -> anyhow::Result<()> {
         let formatted_message = format!(
             "🚨 <b>Alert: {}</b>\n\n{}",
             service_name,
             message
         );
-        self.send_message(&formatted_message).await
+        self.send_message_to(chat_id, &formatted_message).await
     }
 
-    pub async fn send_recovery(&self, service_name: &str, message: &str) -> anyhow::Result<()> {
+    pub async fn send_recovery(&self, chat_id: i64, service_name: &str, message: &str) -> anyhow::Result<()> {
         let formatted_message = format!(
             "✅ <b>Recovery: {}</b>\n\n{}",
             service_name,
             message
         );
-        self.send_message(&formatted_message).await
+        self.send_message_to(chat_id, &formatted_message).await
     }
 }
 

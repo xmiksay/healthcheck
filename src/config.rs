@@ -86,9 +86,19 @@ impl ServiceCertificate {
             Err(e) => return State::Failure(format!("TCP connection failed: {}", e)),
         };
 
-        // Create rustls config
+        // Create rustls config — start with Mozilla's bundle, then add system CAs
+        // so that internal/custom CAs trusted by the OS are also accepted.
         let mut root_cert_store = rustls::RootCertStore::empty();
         root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let native = rustls_native_certs::load_native_certs();
+        for e in &native.errors {
+            tracing::warn!("Could not load native CA cert: {}", e);
+        }
+        for cert in native.certs {
+            if let Err(e) = root_cert_store.add(cert) {
+                tracing::debug!("Skipping native CA cert: {}", e);
+            }
+        }
 
         let config = rustls::ClientConfig::builder()
             .with_root_certificates(root_cert_store)
@@ -208,6 +218,8 @@ pub struct Service {
     pub notify_failures: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rereport: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub telegram_chat_id: Option<i64>,
     pub check: CheckType,
 }
 
@@ -283,8 +295,7 @@ pub struct Config {
     pub rereport: u64,
     pub services: HashMap<String, Service>,
     pub web_port: Option<u16>,
-    pub frontend_path: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_bearer_token: Option<String>,
 }
 
@@ -365,6 +376,9 @@ impl AppState {
                     .and_then(|s| s.notify_failures)
                     .unwrap_or(config.notify_failures);
                 let rereport = service.and_then(|s| s.rereport).unwrap_or(config.rereport);
+                let chat_id = service
+                    .and_then(|s| s.telegram_chat_id)
+                    .unwrap_or(config.telegram_chat_id);
 
                 let notification = match &state {
                     State::Success => {
@@ -378,7 +392,7 @@ impl AppState {
 
                         // Send recovery notification if was previously failing
                         if was_failing {
-                            Some((service_state.name.clone(), "recovered".to_string(), true))
+                            Some((service_state.name.clone(), "recovered".to_string(), true, chat_id))
                         } else {
                             None
                         }
@@ -391,7 +405,7 @@ impl AppState {
 
                         // Send alert if consecutive failures reached threshold
                         if service_state.consecutive_failures == notify_failures {
-                            Some((service_state.name.clone(), reason.clone(), false))
+                            Some((service_state.name.clone(), reason.clone(), false, chat_id))
                         }
                         // Resend alert at rereport intervals
                         else if service_state.consecutive_failures > notify_failures
@@ -402,6 +416,7 @@ impl AppState {
                                 service_state.name.clone(),
                                 format!("{} (still failing)", reason),
                                 false,
+                                chat_id,
                             ))
                         } else {
                             None
@@ -417,11 +432,11 @@ impl AppState {
         }; // Release locks before sending notification
 
         // Send notification if needed (outside of locks)
-        if let Some((service_name, message, is_recovery)) = notification {
+        if let Some((service_name, message, is_recovery, chat_id)) = notification {
             let result = if is_recovery {
-                self.telegram.send_recovery(&service_name, &message).await
+                self.telegram.send_recovery(chat_id, &service_name, &message).await
             } else {
-                self.telegram.send_alert(&service_name, &message).await
+                self.telegram.send_alert(chat_id, &service_name, &message).await
             };
 
             if let Err(e) = result {

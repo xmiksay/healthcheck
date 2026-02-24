@@ -1,15 +1,19 @@
 use axum::{
     async_trait,
     extract::{FromRequestParts, State},
-    http::{request::Parts, StatusCode},
-    response::Json,
+    http::{header, request::Parts, StatusCode},
+    response::{IntoResponse, Json, Response},
     routing::get,
     Router,
 };
+use rust_embed::RustEmbed;
 use tower_http::cors::{Any, CorsLayer};
-use tower_http::services::ServeDir;
 
 use crate::config::{AppState, Config, ServiceState};
+
+#[derive(RustEmbed)]
+#[folder = "frontend/"]
+struct Assets;
 
 // Bearer token extractor for authentication
 pub struct BearerToken(pub String);
@@ -36,6 +40,31 @@ where
                 "Invalid Authorization header format",
             ))
         }
+    }
+}
+
+// Handler for serving embedded static files
+async fn serve_asset(uri: axum::http::Uri) -> impl IntoResponse {
+    let path = uri.path().trim_start_matches('/');
+    let path = if path.is_empty() { "index.html" } else { path };
+
+    match Assets::get(path) {
+        Some(content) => {
+            let mime = match path.rsplit('.').next() {
+                Some("html") => "text/html; charset=utf-8",
+                Some("css") => "text/css",
+                Some("js") => "application/javascript",
+                _ => "application/octet-stream",
+            };
+            Response::builder()
+                .header(header::CONTENT_TYPE, mime)
+                .body(axum::body::Body::from(content.data))
+                .unwrap()
+        }
+        None => Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(axum::body::Body::from("404 Not Found"))
+            .unwrap(),
     }
 }
 
@@ -98,7 +127,7 @@ async fn update_config(
 }
 
 // Create the web server router
-pub fn create_router(app_state: AppState, frontend_path: &str) -> Router {
+pub fn create_router(app_state: AppState) -> Router {
     // Configure CORS to allow requests from any origin
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -109,15 +138,14 @@ pub fn create_router(app_state: AppState, frontend_path: &str) -> Router {
         .route("/api/services", get(get_services))
         .route("/api/config", get(get_config).put(update_config))
         .route("/api/health", get(health_check))
-        .nest_service("/", ServeDir::new(frontend_path))
+        .fallback(serve_asset)
         .layer(cors)
         .with_state(app_state)
 }
 
 // Start the web server
 pub async fn start_server(app_state: AppState, port: u16) -> anyhow::Result<()> {
-    let frontend_path = app_state.get_config().await.frontend_path.clone();
-    let app = create_router(app_state, &frontend_path);
+    let app = create_router(app_state);
     let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 

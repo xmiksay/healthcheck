@@ -116,6 +116,7 @@ angular.module('healthCheckApp', [])
           check_interval_fail: service.check_interval_fail,
           notify_failures: service.notify_failures,
           rereport: service.rereport,
+          telegram_chat_id: service.telegram_chat_id || null,
           showAdvanced: false,
           check: {}
         };
@@ -159,7 +160,6 @@ angular.module('healthCheckApp', [])
         notify_failures: healthCheck.editConfig.notify_failures,
         rereport: healthCheck.editConfig.rereport,
         web_port: healthCheck.editConfig.web_port,
-        frontend_path: healthCheck.editConfig.frontend_path,
         api_bearer_token: healthCheck.editConfig.api_bearer_token,
         services: {}
       };
@@ -185,6 +185,9 @@ angular.module('healthCheckApp', [])
         }
         if (editService.rereport) {
           service.rereport = editService.rereport;
+        }
+        if (editService.telegram_chat_id) {
+          service.telegram_chat_id = editService.telegram_chat_id;
         }
 
         // Convert check based on type

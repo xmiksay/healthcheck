@@ -5,6 +5,12 @@ use healthcheck::{AppState, Config, CONFIG_ENV, CONFIG_VAL};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Install ring as the rustls crypto provider before any TLS usage.
+    // Required when multiple providers (ring + aws-lc-rs) are present in the dep tree.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     // Initialize tracing
     let fmt_layer = tracing_subscriber::fmt::layer();
     let rust_tls = tracing_subscriber::filter::Targets::new()
