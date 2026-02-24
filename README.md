@@ -54,7 +54,9 @@ A comprehensive Rust-based service monitoring application with real-time web das
 ### Prerequisites
 - Rust 1.70+ ([install from rustup.rs](https://rustup.rs))
 - Telegram bot token (get from [@BotFather](https://t.me/botfather))
-- Telegram chat ID (get from [@userinfobot](https://t.me/userinfobot))
+- Telegram chat ID — two ways to get it:
+  1. Send a message to your bot, then open `https://api.telegram.org/bot{YOUR_TOKEN}/getUpdates` in a browser — look for `"chat":{"id":...}` in the response
+  2. Use [@userinfobot](https://t.me/userinfobot) for your personal chat ID
 
 ### Build
 ```bash
@@ -66,6 +68,22 @@ cargo build --release
 Binaries will be in `target/release/`:
 - `healthcheck` (server)
 - `healthcheck_cli` (CLI tool)
+
+### Cross-compilation for Turris (armv7)
+
+Turris Omnia / Turris MOX routers run on ARMv7. Use [`cross`](https://github.com/cross-rs/cross) (requires Docker):
+
+```bash
+cargo install cross
+cross build --release --target armv7-unknown-linux-musleabihf
+```
+
+The binary will be at `target/armv7-unknown-linux-musleabihf/release/healthcheck`. Copy it to the router:
+
+```bash
+scp target/armv7-unknown-linux-musleabihf/release/healthcheck root@turris:/usr/local/bin/
+scp target/armv7-unknown-linux-musleabihf/release/healthcheck_cli root@turris:/usr/local/bin/
+```
 
 ## Configuration
 
@@ -122,6 +140,7 @@ Optional service-level overrides:
 - **check_interval_fail**: Override global setting
 - **notify_failures**: Override global setting
 - **rereport**: Override global setting
+- **telegram_chat_id**: Send notifications for this service to a different Telegram chat/channel
 
 ### Check Types
 
@@ -454,6 +473,7 @@ Key Rust crates:
 - Verify host is correct (without `https://`)
 - Check port is correct (usually 443)
 - Ensure server supports TLS
+- For internal/self-signed CAs: add the CA to the OS trust store — the app loads both Mozilla's bundle and the system CA store automatically
 - Test manually: `openssl s_client -connect host:port`
 
 ## Examples
