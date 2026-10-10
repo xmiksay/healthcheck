@@ -126,14 +126,16 @@ angular.module('healthCheckApp', [])
           editService.checkType = 'http';
           editService.check.http = {
             url: service.check.http.url,
-            expected_status: service.check.http.expected_status
+            expected_status: service.check.http.expected_status,
+            timeout_ms: service.check.http.timeout_ms
           };
         } else if (service.check.certificate) {
           editService.checkType = 'certificate';
           editService.check.certificate = {
             host: service.check.certificate.host,
             port: service.check.certificate.port,
-            days_before_expiry: service.check.certificate.days_before_expiry
+            days_before_expiry: service.check.certificate.days_before_expiry,
+            timeout_ms: service.check.certificate.timeout_ms
           };
         } else if (service.check.tcpPing) {
           editService.checkType = 'tcpPing';
@@ -199,12 +201,18 @@ angular.module('healthCheckApp', [])
           if (editService.check.http.expected_status) {
             service.check.http.expected_status = editService.check.http.expected_status;
           }
+          if (editService.check.http.timeout_ms) {
+            service.check.http.timeout_ms = editService.check.http.timeout_ms;
+          }
         } else if (editService.checkType === 'certificate') {
           service.check.certificate = {
             host: editService.check.certificate.host,
             port: editService.check.certificate.port,
             days_before_expiry: editService.check.certificate.days_before_expiry
           };
+          if (editService.check.certificate.timeout_ms) {
+            service.check.certificate.timeout_ms = editService.check.certificate.timeout_ms;
+          }
         } else if (editService.checkType === 'tcpPing') {
           service.check.tcpPing = {
             host: editService.check.tcpPing.host,

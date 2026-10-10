@@ -35,20 +35,27 @@ impl TelegramClient {
 
         tracing::debug!("Sending Telegram message to chat_id: {}", chat_id);
 
-        let response = self.client
-            .post(&url)
-            .json(&request)
-            .send()
-            .await?;
+        let response = self.client.post(&url).json(&request).send().await?;
 
         if response.status().is_success() {
             tracing::debug!("Telegram message sent successfully");
             Ok(())
         } else {
             let status = response.status();
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-            tracing::error!("Failed to send Telegram message: {} - {}", status, error_text);
-            Err(anyhow::anyhow!("Telegram API error: {} - {}", status, error_text))
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            tracing::error!(
+                "Failed to send Telegram message: {} - {}",
+                status,
+                error_text
+            );
+            Err(anyhow::anyhow!(
+                "Telegram API error: {} - {}",
+                status,
+                error_text
+            ))
         }
     }
 
@@ -56,21 +63,23 @@ impl TelegramClient {
         self.send_message_to(self.chat_id, text).await
     }
 
-    pub async fn send_alert(&self, chat_id: i64, service_name: &str, message: &str) -> anyhow::Result<()> {
-        let formatted_message = format!(
-            "🚨 <b>Alert: {}</b>\n\n{}",
-            service_name,
-            message
-        );
+    pub async fn send_alert(
+        &self,
+        chat_id: i64,
+        service_name: &str,
+        message: &str,
+    ) -> anyhow::Result<()> {
+        let formatted_message = format!("🚨 <b>Alert: {}</b>\n\n{}", service_name, message);
         self.send_message_to(chat_id, &formatted_message).await
     }
 
-    pub async fn send_recovery(&self, chat_id: i64, service_name: &str, message: &str) -> anyhow::Result<()> {
-        let formatted_message = format!(
-            "✅ <b>Recovery: {}</b>\n\n{}",
-            service_name,
-            message
-        );
+    pub async fn send_recovery(
+        &self,
+        chat_id: i64,
+        service_name: &str,
+        message: &str,
+    ) -> anyhow::Result<()> {
+        let formatted_message = format!("✅ <b>Recovery: {}</b>\n\n{}", service_name, message);
         self.send_message_to(chat_id, &formatted_message).await
     }
 }

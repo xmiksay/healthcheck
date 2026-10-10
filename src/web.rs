@@ -9,7 +9,8 @@ use axum::{
 use rust_embed::RustEmbed;
 use tower_http::cors::{Any, CorsLayer};
 
-use crate::config::{AppState, Config, ServiceState};
+use crate::config::Config;
+use crate::state::{AppState, ServiceState};
 
 #[derive(RustEmbed)]
 #[folder = "frontend/"]

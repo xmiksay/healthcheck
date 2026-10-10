@@ -159,6 +159,10 @@
                       <label>Expected Status Code:</label>
                       <input type="number" ng-model="service.check.http.expected_status" placeholder="200">
                     </div>
+                    <div class="form-group">
+                      <label>Timeout (ms):</label>
+                      <input type="number" ng-model="service.check.http.timeout_ms" placeholder="10000">
+                    </div>
                   </div>
                 </div>
 
@@ -177,6 +181,10 @@
                     <div class="form-group">
                       <label>Days Before Expiry:</label>
                       <input type="number" ng-model="service.check.certificate.days_before_expiry" placeholder="30">
+                    </div>
+                    <div class="form-group">
+                      <label>Timeout (ms):</label>
+                      <input type="number" ng-model="service.check.certificate.timeout_ms" placeholder="10000">
                     </div>
                   </div>
                 </div>

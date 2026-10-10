@@ -78,11 +78,15 @@ async fn handle_telegram_command(
 
     match message_type {
         "success" => {
-            telegram.send_recovery(config.telegram_chat_id, "CLI", message).await?;
+            telegram
+                .send_recovery(config.telegram_chat_id, "CLI", message)
+                .await?;
             println!("Success message sent to Telegram");
         }
         "error" => {
-            telegram.send_alert(config.telegram_chat_id, "CLI", message).await?;
+            telegram
+                .send_alert(config.telegram_chat_id, "CLI", message)
+                .await?;
             println!("Error message sent to Telegram");
         }
         _ => {
@@ -107,13 +111,8 @@ async fn handle_test_service_command(config: &Config, id: &str) -> anyhow::Resul
         println!("Warning: Service is disabled in configuration");
     }
 
-    // Run the check
-    use healthcheck::config::{CheckType, State};
-    let state = match &service.check {
-        CheckType::Certificate(cert) => cert.check().await,
-        CheckType::Http(http) => http.check().await,
-        CheckType::TcpPing(tcp) => tcp.check().await,
-    };
+    use healthcheck::State;
+    let state = service.check.run().await;
 
     // Display result
     match state {
