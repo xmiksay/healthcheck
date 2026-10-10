@@ -79,3 +79,38 @@ async fn connection_refused_reports_cause() {
         other => panic!("expected failure, got {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn every_check_opens_a_fresh_connection() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // Keep-alive server that never closes: a pooled client would reuse the socket.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let counter = accepted.clone();
+    tokio::spawn(async move {
+        loop {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            counter.fetch_add(1, Ordering::SeqCst);
+            tokio::spawn(async move {
+                let mut buf = [0u8; 1024];
+                while let Ok(n) = sock.read(&mut buf).await {
+                    if n == 0 {
+                        break;
+                    }
+                    let _ = sock
+                        .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n")
+                        .await;
+                }
+            });
+        }
+    });
+
+    let check = http(format!("http://{addr}/"), Some(2000));
+    assert_eq!(check.check().await, State::Success);
+    assert_eq!(check.check().await, State::Success);
+    assert_eq!(accepted.load(Ordering::SeqCst), 2);
+}
