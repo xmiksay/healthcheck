@@ -1,3 +1,4 @@
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use schemars::JsonSchema;
@@ -33,6 +34,49 @@ pub fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
     out
 }
 
+/// Shared by all HTTP checks; the per-check timeout is set on each request.
+/// Pooling is off so every check does a fresh DNS lookup, connect and TLS
+/// handshake — a reused connection would hide exactly the failures we monitor.
+fn http_client() -> Result<&'static reqwest::Client, &'static str> {
+    static CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .pool_max_idle_per_host(0)
+                .build()
+                .map_err(|e| error_chain(&e))
+        })
+        .as_ref()
+        .map_err(String::as_str)
+}
+
+/// Built once: loading and parsing the OS CA bundle on every certificate check
+/// is wasted work on the router. CAs added to the OS take effect after a restart.
+fn tls_config() -> Arc<rustls::ClientConfig> {
+    static CONFIG: OnceLock<Arc<rustls::ClientConfig>> = OnceLock::new();
+    CONFIG
+        .get_or_init(|| {
+            // Mozilla's bundle plus the OS store, so internal/custom CAs trusted by the OS work too.
+            let mut roots = rustls::RootCertStore::empty();
+            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            let native = rustls_native_certs::load_native_certs();
+            for e in &native.errors {
+                tracing::warn!("Could not load native CA cert: {}", e);
+            }
+            for cert in native.certs {
+                if let Err(e) = roots.add(cert) {
+                    tracing::debug!("Skipping native CA cert: {}", e);
+                }
+            }
+            Arc::new(
+                rustls::ClientConfig::builder()
+                    .with_root_certificates(roots)
+                    .with_no_client_auth(),
+            )
+        })
+        .clone()
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone, Hash, JsonSchema)]
 pub struct ServiceHttp {
     pub url: String,
@@ -44,16 +88,12 @@ pub struct ServiceHttp {
 impl ServiceHttp {
     pub async fn check(&self) -> State {
         let timeout = Duration::from_millis(self.timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS));
-        let client = match reqwest::Client::builder()
-            .timeout(timeout)
-            .connect_timeout(timeout)
-            .build()
-        {
+        let client = match http_client() {
             Ok(client) => client,
-            Err(e) => return State::Failure(format!("Client setup failed: {}", error_chain(&e))),
+            Err(e) => return State::Failure(format!("Client setup failed: {}", e)),
         };
 
-        match client.get(&self.url).send().await {
+        match client.get(&self.url).timeout(timeout).send().await {
             Ok(response) => {
                 let status = response.status().as_u16();
                 let expected = self.expected_status.unwrap_or(200);
@@ -115,7 +155,6 @@ impl ServiceCertificate {
     /// Connects, handshakes and returns the number of days until the leaf certificate expires.
     async fn days_until_expiry(&self) -> Result<i64, String> {
         use rustls::pki_types::ServerName;
-        use std::sync::Arc;
         use tokio::net::TcpStream;
         use tokio_rustls::TlsConnector;
 
@@ -124,23 +163,7 @@ impl ServiceCertificate {
             .await
             .map_err(|e| format!("TCP connection failed: {}", error_chain(&e)))?;
 
-        // Mozilla's bundle plus the OS store, so internal/custom CAs trusted by the OS work too.
-        let mut root_cert_store = rustls::RootCertStore::empty();
-        root_cert_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        let native = rustls_native_certs::load_native_certs();
-        for e in &native.errors {
-            tracing::warn!("Could not load native CA cert: {}", e);
-        }
-        for cert in native.certs {
-            if let Err(e) = root_cert_store.add(cert) {
-                tracing::debug!("Skipping native CA cert: {}", e);
-            }
-        }
-
-        let config = rustls::ClientConfig::builder()
-            .with_root_certificates(root_cert_store)
-            .with_no_client_auth();
-        let connector = TlsConnector::from(Arc::new(config));
+        let connector = TlsConnector::from(tls_config());
 
         let server_name = ServerName::try_from(self.host.as_str())
             .map_err(|e| format!("Invalid DNS name: {}", e))?

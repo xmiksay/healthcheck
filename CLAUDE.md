@@ -77,7 +77,7 @@ AngularJS single-page app embedded into the binary. It reads the public `/api/st
 - Service IDs are the YAML keys and must match `^[a-z0-9][a-z0-9_-]{0,63}$` (lowercase UUIDs pass)
 - `Config` is intentionally re-serialized to YAML on every API write, which means comments and unknown fields from the original file are dropped
 - Per-service optional overrides follow the same pattern: `service.field.unwrap_or(config.field)` — applies to `check_interval_success`, `check_interval_fail`, `notify_failures`, `rereport`, and `telegram_chat_id`
-- TLS for certificate checks uses both Mozilla's webpki-roots bundle **and** the OS native CA store (`rustls-native-certs`), so internal/custom CAs work out of the box
+- TLS for certificate checks uses both Mozilla's webpki-roots bundle **and** the OS native CA store (`rustls-native-certs`), so internal/custom CAs work out of the box. The rustls `ClientConfig` (certificate checks) and the `reqwest::Client` (HTTP checks) are built once in `OnceLock`s — OS CA changes need a restart. The HTTP client has pooling disabled on purpose: every check must do a fresh DNS lookup + connect + handshake, a reused connection would mask exactly the failures being monitored
 - Both binaries call `rustls::crypto::ring::default_provider().install_default()` at startup to resolve the ambiguity between `ring` and `aws-lc-rs` (both pulled in transitively)
 - Config path is resolved: CLI flag → `HEALTHCHECK_CONFIG` env var → `healthcheck.yaml` default
 

@@ -32,3 +32,8 @@ schemars = "1.0"
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+
+# The binary ships to a flash-constrained router: drop symbols, thin LTO keeps build time sane.
+[profile.release]
+strip = true
+lto = "thin"
