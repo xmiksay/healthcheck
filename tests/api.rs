@@ -156,6 +156,13 @@ async fn admin_routes_reject_missing_or_wrong_token() {
         .unwrap();
     let resp = app.router.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    // The auth scheme is case-insensitive (RFC 7235).
+    let req = Request::get("/api/settings")
+        .header(header::AUTHORIZATION, format!("bearer {TOKEN}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
 }
 
 #[tokio::test]

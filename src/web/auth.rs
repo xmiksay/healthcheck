@@ -26,7 +26,9 @@ pub async fn require_admin(State(state): State<AppState>, req: Request, next: Ne
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
-        .and_then(|h| h.strip_prefix("Bearer "));
+        .and_then(|h| h.split_once(' '))
+        .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("bearer"))
+        .map(|(_, token)| token.trim());
 
     match provided {
         None => ApiError(
@@ -34,7 +36,7 @@ pub async fn require_admin(State(state): State<AppState>, req: Request, next: Ne
             "missing or malformed Authorization header".into(),
         )
         .into_response(),
-        Some(token) if !constant_time_eq(token.as_bytes(), expected.as_bytes()) => {
+        Some(token) if !constant_time_eq(token.as_bytes(), expected.trim().as_bytes()) => {
             ApiError(StatusCode::UNAUTHORIZED, "invalid bearer token".into()).into_response()
         }
         Some(_) => next.run(req).await,

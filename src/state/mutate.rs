@@ -51,6 +51,26 @@ impl AppState {
         Ok(self.entry(id, service).await)
     }
 
+    /// Flips `enabled` under the write lock, so a concurrent edit is never overwritten.
+    pub async fn set_service_enabled(
+        &self,
+        id: &str,
+        enabled: bool,
+    ) -> Result<ServiceEntry, AppError> {
+        let _guard = self.write_lock.lock().await;
+        let mut config = self.get_config().await;
+        let slot = config
+            .services
+            .get_mut(id)
+            .ok_or_else(|| AppError::NotFound(id.to_string()))?;
+        slot.enabled = enabled;
+        let service = slot.clone();
+        self.commit(config).await?;
+        self.apply_live(id, Some(&service)).await;
+        tracing::info!("Service '{}' enabled={}", id, enabled);
+        Ok(self.entry(id, service).await)
+    }
+
     pub async fn delete_service(&self, id: &str) -> Result<(), AppError> {
         let _guard = self.write_lock.lock().await;
         let mut config = self.get_config().await;
@@ -92,6 +112,10 @@ impl AppState {
 /// Writes `<path>.tmp` next to the target and renames it over, so a crash never
 /// leaves a truncated config behind.
 async fn write_atomic(path: &Path, contents: &[u8]) -> anyhow::Result<()> {
+    // Rename replaces a symlink with a plain file; write next to its target instead.
+    let path = &tokio::fs::canonicalize(path)
+        .await
+        .unwrap_or_else(|_| path.to_path_buf());
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
@@ -123,4 +147,23 @@ async fn write_atomic(path: &Path, contents: &[u8]) -> anyhow::Result<()> {
         let _ = tokio::fs::remove_file(&tmp).await;
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::write_atomic;
+
+    #[tokio::test]
+    async fn write_atomic_keeps_symlink_and_writes_its_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("real.yaml");
+        let link = dir.path().join("link.yaml");
+        std::fs::write(&target, "old").unwrap();
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        write_atomic(&link, b"new").await.unwrap();
+
+        assert!(std::fs::symlink_metadata(&link).unwrap().is_symlink());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "new");
+    }
 }

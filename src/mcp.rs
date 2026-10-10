@@ -187,12 +187,7 @@ impl HealthcheckMcp {
         &self,
         Parameters(EnabledArgs { id, enabled }): Parameters<EnabledArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        let result = async {
-            let mut service = self.state.get_service(&id).await?.service;
-            service.enabled = enabled;
-            self.state.update_service(&id, service).await
-        };
-        to_result(result.await)
+        to_result(self.state.set_service_enabled(&id, enabled).await)
     }
 
     #[tool(description = "Run a saved service's check once right now and return \

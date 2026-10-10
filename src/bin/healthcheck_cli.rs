@@ -74,7 +74,7 @@ async fn handle_telegram_command(
     message_type: &str,
     message: &str,
 ) -> anyhow::Result<()> {
-    let telegram = TelegramClient::new(config.telegram_token.clone(), config.telegram_chat_id);
+    let telegram = TelegramClient::new(config.telegram_token.clone());
 
     match message_type {
         "success" => {

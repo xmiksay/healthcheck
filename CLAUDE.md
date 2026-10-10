@@ -62,7 +62,7 @@ Two binaries share a single library crate:
 - Resource `healthcheck://status` (application/json) = live `AppState::status()`
 - Tool input schemas come from `schemars::JsonSchema`, derived on `Service`, `CheckType` + its structs and `Settings` — keep the derive on any new config/check type
 
-**`telegram.rs`** — thin wrapper around the Telegram Bot HTTP API using `reqwest`.
+**`telegram.rs`** — thin wrapper around the Telegram Bot HTTP API using `reqwest`. Every send has a 10 s timeout (a monitor loop awaits it) and HTML-escapes the service name and message (`parse_mode: HTML` rejects stray `&`/`<`/`>`). Chat id is always passed explicitly — it is a hot-editable setting
 
 ### Frontend (`frontend/`)
 

@@ -46,10 +46,7 @@ impl AppState {
             .map(|(id, service)| (id.clone(), ServiceState::new(id, service)))
             .collect();
 
-        let telegram = Arc::new(TelegramClient::new(
-            config.telegram_token.clone(),
-            config.telegram_chat_id,
-        ));
+        let telegram = Arc::new(TelegramClient::new(config.telegram_token.clone()));
 
         Self {
             services: Arc::new(RwLock::new(services)),
@@ -89,25 +86,44 @@ impl AppState {
 
         if let Some((service_name, notification)) = notification {
             tracing::info!("Service '{}': {:?}", service_name, notification);
-            let result = match &notification {
-                Notification::Recovery(msg) => {
-                    self.telegram
-                        .send_recovery(chat_id, &service_name, msg)
-                        .await
-                }
-                Notification::Alert(msg) => {
-                    self.telegram.send_alert(chat_id, &service_name, msg).await
-                }
-            };
-            match result {
-                Ok(()) if matches!(notification, Notification::Alert(_)) => {
-                    if let Some(s) = self.services.write().await.get_mut(&id) {
-                        s.alerted = true;
-                    }
-                }
-                Ok(()) => {}
-                Err(e) => tracing::error!("Failed to send Telegram notification: {}", e),
+            // Spawned so that aborting the monitor task (service edited mid-send)
+            // cannot cut between a delivered alert and recording `alerted`.
+            // Awaiting it keeps sends sequential with the service's checks.
+            let state = self.clone();
+            let send = tokio::spawn(async move {
+                state
+                    .deliver(id, chat_id, &service_name, notification)
+                    .await
+            });
+            if let Err(e) = send.await {
+                tracing::error!("Telegram notification task failed: {}", e);
             }
+        }
+    }
+
+    async fn deliver(
+        &self,
+        id: String,
+        chat_id: i64,
+        service_name: &str,
+        notification: Notification,
+    ) {
+        let result = match &notification {
+            Notification::Recovery(msg) => {
+                self.telegram
+                    .send_recovery(chat_id, service_name, msg)
+                    .await
+            }
+            Notification::Alert(msg) => self.telegram.send_alert(chat_id, service_name, msg).await,
+        };
+        match result {
+            Ok(()) if matches!(notification, Notification::Alert(_)) => {
+                if let Some(s) = self.services.write().await.get_mut(&id) {
+                    s.alerted = true;
+                }
+            }
+            Ok(()) => {}
+            Err(e) => tracing::error!("Failed to send Telegram notification: {}", e),
         }
     }
 

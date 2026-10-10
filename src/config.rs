@@ -45,7 +45,7 @@ impl Service {
 
             app_state.set_state(id.clone(), state.clone()).await;
 
-            let config = app_state.get_config().await;
+            let config = app_state.get_settings().await;
             let interval = match &state {
                 State::Failure(_) => self
                     .check_interval_fail
