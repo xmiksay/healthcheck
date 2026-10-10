@@ -4,15 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-```bash
-cargo build                          # dev build
-cargo build --release                # release build (binaries in target/release/)
-cargo run                            # run server (requires healthcheck.yaml)
-cargo test                           # run tests
-HEALTHCHECK_CONFIG=my.yaml cargo run # use custom config file
+Use the Makefile (`CARGO_BUILD_JOBS=4` is set there):
 
-# Cross-compile for Turris Omnia/MOX (ARMv7, requires Docker)
-cross build --release --target armv7-unknown-linux-musleabihf
+```bash
+make build / make release        # dev / release build (binaries in target/release/)
+make run                         # run server (requires healthcheck.yaml)
+make test                        # all tests; make test-unit / make test-integration
+make lint                        # cargo clippy --all-targets -D warnings
+make fmt                         # cargo fmt
+make check                       # fmt + lint + test — run before declaring done
+make cross                       # cross-compile for Turris Omnia/MOX (ARMv7 musl, needs Docker)
+HEALTHCHECK_CONFIG=my.yaml cargo run   # custom config file
 ```
 
 ## Architecture
@@ -24,12 +26,21 @@ Two binaries share a single library crate:
 
 ### Core library (`src/`)
 
-**`config.rs`** is the heart of the application. It contains:
+**`checks.rs`** — the check implementations:
 
-- The `Config` struct (deserialized from YAML) — service keys are arbitrary strings used as IDs
-- `CheckType` enum with three variants: `Http`, `Certificate`, `TcpPing` — each has its own struct implementing an async `check() -> State` method
-- `AppState` wraps `Config` + live `ServiceState` map + task handles in `Arc<RwLock<_>>`; it is cheaply cloned and passed everywhere
-- `Service::run()` is the per-service loop: checks, updates state, sends Telegram alerts, sleeps
+- `State` (`Unknown | Success | Failure(reason)`)
+- `CheckType` enum with three variants: `Http`, `Certificate`, `TcpPing` — each has its own struct with an async `check() -> State`; `CheckType::run()` dispatches (used by both the monitor loop and the CLI)
+- `Http` and `Certificate` take an optional `timeout_ms` (default `DEFAULT_TIMEOUT_MS` = 10 s) covering connect + response / handshake
+- `error_chain()` renders an error with its full `source()` chain — failure reasons must show the root cause (DNS, refused, reset, timeout), not reqwest's generic "error sending request"
+
+**`config.rs`** — `Config` (deserialized from YAML; service keys are arbitrary strings used as IDs), `Service` and `Service::run()`, the per-service loop: check → `AppState::set_state` → sleep
+
+**`state.rs`** — runtime state and notification policy:
+
+- `ServiceState` (what `GET /api/services` returns; `failing_since` tracks the current failure streak)
+- `apply_check()` is a pure function: updates counters and returns `Option<Notification>`; it is unit-tested, keep notification logic there
+- Alert after `notify_failures` consecutive failures, re-alert every `rereport` failures; **recovery is only sent if an alert was sent** — shorter blips are counted but silent
+- `AppState` wraps `Config` + live `ServiceState` map + task handles in `Arc<RwLock<_>>`; cheaply cloned and passed everywhere
 
 **`web.rs`** — Axum router. Frontend files are embedded at compile time via `rust-embed` (`#[folder = "frontend/"]`), served through a `fallback` handler. API routes:
 
@@ -43,6 +54,10 @@ Two binaries share a single library crate:
 
 AngularJS single-page app embedded into the binary. The visual config editor in `index.html` / `index.js` hits `/api/config` (GET to load, PUT to save). Bearer token is stored in `localStorage` and sent as `Authorization: Bearer ...`.
 
+### Deployment (`deploy/`)
+
+`deploy/healthcheck.init` is the procd init script for the Turris (`/etc/init.d/healthcheck`). stdout/stderr are forwarded to `logread`, so per-check log noise must stay at `debug`; failures log at `warn`, notifications at `info`.
+
 ### Key design points
 
 - Service IDs are arbitrary strings in the YAML (not required to be UUIDs)
@@ -54,7 +69,7 @@ AngularJS single-page app embedded into the binary. The visual config editor in 
 
 ### Adding a new check type
 
-1. Add struct + `async fn check(&self) -> State` in `config.rs`
+1. Add struct + `async fn check(&self) -> State` in `checks.rs`, and a match arm in `CheckType::run()`
 2. Add variant to `CheckType` enum (keep `#[serde(rename_all = "camelCase")]`)
-3. Add match arm in `Service::run()` and in `healthcheck_cli.rs`
-4. Add UI section in `frontend/index.html` and `frontend/index.js`
+3. Add UI section in `frontend/index.html` and `frontend/index.js`
+4. Document it in `README.md` (Check Types) and add a test

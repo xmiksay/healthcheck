@@ -22,7 +22,8 @@ A comprehensive Rust-based service monitoring application with real-time web das
 ### Telegram Notifications
 - **Smart Alerting**: Notify after N consecutive failures (configurable)
 - **Periodic Re-notifications**: Re-alert every N failures to ensure awareness
-- **Recovery Notifications**: Automatic alerts when services recover
+- **Recovery Notifications**: Sent when a service that was alerted on recovers (short blips stay silent)
+- **Root-Cause Reasons**: Alerts carry the full error chain (DNS failure, connection refused, timeout, TLS error)
 - **HTML Formatting**: Rich message formatting with emojis (🚨 alerts, ✅ recovery)
 
 ### CLI Tools
@@ -38,7 +39,9 @@ A comprehensive Rust-based service monitoring application with real-time web das
 
 ### Backend Components (Rust)
 - **[src/lib.rs](src/lib.rs)**: Shared library exports
-- **[src/config.rs](src/config.rs)**: Configuration, state management, and health check implementations
+- **[src/checks.rs](src/checks.rs)**: Health check implementations (http / certificate / tcpPing) and `State`
+- **[src/config.rs](src/config.rs)**: YAML configuration model and the per-service monitor loop
+- **[src/state.rs](src/state.rs)**: Runtime state, notification policy (`apply_check`), `AppState`
 - **[src/web.rs](src/web.rs)**: REST API and static file serving (Axum framework)
 - **[src/telegram.rs](src/telegram.rs)**: Telegram Bot API integration (reqwest-based)
 - **[src/bin/healthcheck.rs](src/bin/healthcheck.rs)**: Server entry point
@@ -75,7 +78,7 @@ Turris Omnia / Turris MOX routers run on ARMv7. Use [`cross`](https://github.com
 
 ```bash
 cargo install cross
-cross build --release --target armv7-unknown-linux-musleabihf
+make cross   # = cross build --release --target armv7-unknown-linux-musleabihf
 ```
 
 The binary will be at `target/armv7-unknown-linux-musleabihf/release/healthcheck`. Copy it to the router:
@@ -84,6 +87,22 @@ The binary will be at `target/armv7-unknown-linux-musleabihf/release/healthcheck
 scp target/armv7-unknown-linux-musleabihf/release/healthcheck root@turris:/usr/local/bin/
 scp target/armv7-unknown-linux-musleabihf/release/healthcheck_cli root@turris:/usr/local/bin/
 ```
+
+### Turris init script (procd)
+
+`deploy/healthcheck.init` runs the service under procd with stdout/stderr forwarded to the
+system log and automatic respawn. Install it once (and again whenever it changes):
+
+```bash
+scp deploy/healthcheck.init root@turris:/etc/init.d/healthcheck
+ssh root@turris 'chmod +x /etc/init.d/healthcheck && /etc/init.d/healthcheck enable && /etc/init.d/healthcheck restart'
+ssh root@turris 'logread -e healthcheck'   # check failures are logged with their reason
+```
+
+### Make targets
+
+`make build | release | run | test | test-unit | test-integration | lint | fmt | check | clean | cross`
+(`check` = fmt + clippy + tests; `CARGO_BUILD_JOBS` defaults to 4).
 
 ## Configuration
 
@@ -149,6 +168,7 @@ Optional service-level overrides:
 check: !http
   url: "https://api.example.com/health"
   expected_status: 200  # Optional, defaults to 200
+  timeout_ms: 10000     # Optional, connect + total timeout, defaults to 10000
 ```
 
 #### TCP Ping Check
@@ -165,6 +185,7 @@ check: !certificate
   host: "example.com"
   port: 443
   days_before_expiry: 30  # Alert if expires within 30 days
+  timeout_ms: 10000       # Optional, connect + handshake timeout, defaults to 10000
 ```
 
 ## Usage
@@ -354,7 +375,9 @@ Services can be in one of three states:
 - Message includes "(still failing)" indicator
 
 ### Recovery Alert
-- Sent immediately when service recovers from failure state
+- Sent on the first successful check **after an alert was sent** (i.e. the failure streak had reached `notify_failures`)
+- Failure streaks shorter than `notify_failures` are counted in the statistics but produce no message
+- Message includes the number of failed checks and the downtime, e.g. `recovered after 3 failed checks (2m 30s)`
 - Resets consecutive failure counter
 
 ## Development
@@ -364,7 +387,9 @@ Services can be in one of three states:
 healthcheck/
 ├── src/
 │   ├── lib.rs                 # Library exports
-│   ├── config.rs              # Config & state management
+│   ├── checks.rs              # Check types (http / certificate / tcpPing) + State
+│   ├── config.rs              # YAML config model & per-service monitor loop
+│   ├── state.rs               # Runtime state, notification policy, AppState
 │   ├── web.rs                 # Web server & API
 │   ├── telegram.rs            # Telegram notifications
 │   └── bin/
@@ -383,7 +408,7 @@ healthcheck/
 
 ### Adding New Check Types
 
-1. Add variant to `CheckType` enum in [src/config.rs](src/config.rs):
+1. Add variant to `CheckType` enum in [src/checks.rs](src/checks.rs) (and a match arm in `CheckType::run()`):
 ```rust
 #[derive(Deserialize, Serialize, Debug, Clone, Hash)]
 #[serde(rename_all = "camelCase")]
@@ -427,7 +452,9 @@ let state = match &self.check {
 
 ### Running Tests
 ```bash
-cargo test
+make test              # everything
+make test-unit         # unit tests in src/
+make test-integration  # tests/ (HTTP check against a local axum server)
 ```
 
 ### Development Server
