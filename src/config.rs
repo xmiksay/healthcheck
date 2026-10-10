@@ -1,13 +1,14 @@
 use std::{collections::HashMap, time::Duration};
 
 use anyhow::Context;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::checks::{CheckType, State};
 use crate::state::AppState;
 use crate::validate::validate_config;
 
-#[derive(Deserialize, Serialize, Debug, Clone, Hash)]
+#[derive(Deserialize, Serialize, Debug, Clone, Hash, JsonSchema)]
 pub struct Service {
     pub enabled: bool,
     pub name: String,
@@ -76,7 +77,7 @@ pub struct Config {
 }
 
 /// The globals editable through the API. Secrets and `web_port` are file-only.
-#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, JsonSchema)]
 pub struct Settings {
     pub check_interval_success: u64,
     pub check_interval_fail: u64,

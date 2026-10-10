@@ -46,6 +46,7 @@ A comprehensive Rust-based service monitoring application with real-time web das
 - **[src/validate.rs](src/validate.rs)**: Config / API input validation
 - **[src/error.rs](src/error.rs)**: `AppError` returned by the `AppState` API
 - **[src/web/](src/web/mod.rs)**: REST API (Axum): `public.rs`, `admin.rs`, bearer auth in `auth.rs`, embedded static files
+- **[src/mcp.rs](src/mcp.rs)**: MCP server at `/mcp` (tools + `healthcheck://status` resource) over the same `AppState` API
 - **[src/telegram.rs](src/telegram.rs)**: Telegram Bot API integration (reqwest-based)
 - **[src/bin/healthcheck.rs](src/bin/healthcheck.rs)**: Server entry point
 - **[src/bin/healthcheck_cli.rs](src/bin/healthcheck_cli.rs)**: CLI entry point
@@ -273,7 +274,7 @@ All routes live under `/api`. Errors are always JSON: `{"error": "message"}`.
 | Route | Auth |
 |---|---|
 | `GET /api/health`, `GET /api/status`, static frontend | public |
-| everything else under `/api` | admin: `Authorization: Bearer <api_bearer_token>` |
+| everything else under `/api`, and `/mcp` | admin: `Authorization: Bearer <api_bearer_token>` |
 
 - `api_bearer_token` unset (or blank) in the YAML → admin routes answer **403** `{"error":"admin API disabled: set api_bearer_token"}` (fail closed); a warning is logged at startup.
 - Missing, malformed or wrong token → **401**. Tokens are compared in constant time.
@@ -366,6 +367,50 @@ Applied at startup (`Config::load` fails with the full message) and on every API
 | `port` | `1..=65535` |
 | `host` | non-empty after trim |
 
+## MCP
+
+The server exposes a [Model Context Protocol](https://modelcontextprotocol.io) endpoint at **`/mcp`** (streamable HTTP, stateless, JSON responses), so an AI client such as Claude Code or Claude Desktop can inspect and manage the monitor. It sits behind the **same admin auth** as `/api`: send `Authorization: Bearer <api_bearer_token>`; with no token configured it answers 403.
+
+Claude Code:
+
+```bash
+claude mcp add --transport http healthcheck http://<host>:<port>/mcp \
+  --header "Authorization: Bearer <token>"
+```
+
+Equivalent `.mcp.json` (project scope):
+
+```json
+{
+  "mcpServers": {
+    "healthcheck": {
+      "type": "http",
+      "url": "http://<host>:<port>/mcp",
+      "headers": { "Authorization": "Bearer <token>" }
+    }
+  }
+}
+```
+
+Tools (thin wrappers over the REST operations; all intervals are in milliseconds, ids match `^[a-z0-9][a-z0-9_-]{0,63}$`):
+
+| Tool | Arguments | Does |
+|---|---|---|
+| `list_services` | – | all services incl. disabled, with live status |
+| `get_service` | `id` | one service + live status |
+| `create_service` | `id`, `service` | create (and start if enabled) |
+| `update_service` | `id`, `service` | **full replace** of the service config; stats kept |
+| `delete_service` | `id` | stop and remove |
+| `set_service_enabled` | `id`, `enabled` | toggle monitoring, other fields unchanged |
+| `run_service_check` | `id` | run the saved check once (not recorded) |
+| `test_check` | `check` | run an unsaved `CheckType` once |
+| `get_settings` | – | global settings |
+| `update_settings` | `settings` | **full replace** of the global settings |
+
+Validation and lookup errors come back as tool results with `isError: true` and the same message the REST API would return. The resource **`healthcheck://status`** (`application/json`) holds the live status of all enabled services (same as `GET /api/status`).
+
+> claude.ai web connectors require OAuth, which is **not supported** — use a client that can send a static header (Claude Code, Claude Desktop via config).
+
 ## Service States
 
 Services can be in one of three states:
@@ -404,6 +449,7 @@ healthcheck/
 │   ├── validate.rs            # Input validation rules
 │   ├── error.rs               # AppError (404/409/422/500)
 │   ├── web/                   # Axum router: public, admin, auth
+│   ├── mcp.rs                 # MCP server (/mcp)
 │   ├── telegram.rs            # Telegram notifications
 │   └── bin/
 │       ├── healthcheck.rs     # Server binary
@@ -423,7 +469,7 @@ healthcheck/
 
 1. Add variant to `CheckType` enum in [src/checks.rs](src/checks.rs) (and a match arm in `CheckType::run()`):
 ```rust
-#[derive(Deserialize, Serialize, Debug, Clone, Hash)]
+#[derive(Deserialize, Serialize, Debug, Clone, Hash, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum CheckType {
     Http(ServiceHttp),
@@ -435,7 +481,7 @@ pub enum CheckType {
 
 2. Implement check struct:
 ```rust
-#[derive(Deserialize, Serialize, Debug, Clone, Hash)]
+#[derive(Deserialize, Serialize, Debug, Clone, Hash, JsonSchema)]
 pub struct ServiceYourNewCheck {
     pub field1: String,
     pub field2: u64,
@@ -467,7 +513,7 @@ let state = match &self.check {
 ```bash
 make test              # everything
 make test-unit         # unit tests in src/
-make test-integration  # tests/ (HTTP check against a local server, API via the router)
+make test-integration  # tests/ (HTTP check against a local server, API via the router, MCP over a local listener)
 ```
 
 ### Development Server
@@ -480,6 +526,7 @@ cargo watch -x run
 
 Key Rust crates:
 - **axum** (0.8) - Web framework
+- **rmcp** (3.5) / **schemars** (1) - MCP server (official Rust SDK) and tool input schemas
 - **rust-embed** - Frontend embedded into the binary
 - **tokio** (1.49.0) - Async runtime
 - **reqwest** (0.13.1) - HTTP client

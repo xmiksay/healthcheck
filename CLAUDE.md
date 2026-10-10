@@ -43,7 +43,7 @@ Two binaries share a single library crate:
 - `apply_check()` is a pure function: updates counters and returns `Option<Notification>`; it is unit-tested, keep notification logic there
 - Alert once the streak reaches `notify_failures`, re-alert every `rereport` failures; **recovery is only sent if the alert was delivered** (`alerted` is set by the caller after Telegram returns OK). An undelivered alert is retried on the next failure; shorter blips are counted but silent
 
-**`state/`** — `AppState` (cheaply cloned, passed everywhere): `Config`, live `ServiceState` map, task handles. Its public methods are **the** application API, shared by HTTP and the planned MCP layer: `status`, `list_services`, `get_service`, `get_settings`, `create_service`, `update_service`, `delete_service`, `update_settings`, `run_service_check`, `test_check`; errors are `error::AppError` (`NotFound`/`Conflict`/`Invalid`/`Persist` → 404/409/422/500)
+**`state/`** — `AppState` (cheaply cloned, passed everywhere): `Config`, live `ServiceState` map, task handles. Its public methods are **the** application API, shared by HTTP and the MCP layer: `status`, `list_services`, `get_service`, `get_settings`, `create_service`, `update_service`, `delete_service`, `update_settings`, `run_service_check`, `test_check`; errors are `error::AppError` (`NotFound`/`Conflict`/`Invalid`/`Persist` → 404/409/422/500)
 
 - `mutate.rs` — the single serialized write path: `write_lock` → clone config → change → validate → write `<config>.tmp` + rename → swap in memory → restart/stop only the affected task. Any failure before the swap changes nothing. Editing a service keeps its live stats; disable/delete drops its status; settings need no restart (loops read globals every cycle)
 - Never hold two of the `RwLock`s at once (clone, release, then take the next) — `set_state()` reads config first, then decides under the services lock and sends Telegram outside it
@@ -52,8 +52,15 @@ Two binaries share a single library crate:
 
 - `public.rs` — `GET /api/health` (text `OK`), `GET /api/status` (enabled services' `Status`, sorted by name)
 - `admin.rs` — `GET|PUT /api/settings`, `GET|POST /api/services`, `GET|PUT|DELETE /api/services/{id}`, `POST /api/services/{id}/check`, `POST /api/checks/test`
-- `auth.rs` — `require_admin` middleware (`route_layer(middleware::from_fn_with_state(..))` on the admin router; mount future admin surfaces such as `/mcp` behind it). Bearer token compared in constant time; missing/wrong → 401; `api_bearer_token` unset/blank → 403 for every admin route (fail closed, warned at startup)
+- `auth.rs` — `require_admin` middleware (`route_layer(middleware::from_fn_with_state(..))` on the admin router, which also carries `/mcp`). Bearer token compared in constant time; missing/wrong → 401; `api_bearer_token` unset/blank → 403 for every admin route (fail closed, warned at startup)
 - `telegram_token`, `api_bearer_token`, `web_port` are file-only: never returned or writable via the API, preserved on every rewrite
+
+**`mcp.rs`** — MCP server (`rmcp` crate, `#[tool_router]`/`#[tool_handler]` macros) at `/mcp` (streamable HTTP), merged into the admin router so it sits behind `require_admin` (static `Authorization: Bearer` header, no OAuth):
+
+- Transport: **stateless** (`legacy_session_mode(false)`, `NeverSessionManager`) with plain JSON responses — no session state, survives restarts; `GET` answers 405. rmcp's loopback-only `Host` check is disabled (the device is reached by LAN name/IP; the bearer token already blocks DNS rebinding)
+- Tools are thin wrappers over the `AppState` methods (no logic of their own): `list_services`, `get_service`, `create_service`, `update_service` (full replace), `delete_service`, `set_service_enabled` (read-modify-write via `update_service`), `run_service_check`, `test_check`, `get_settings`, `update_settings`. Results are JSON text content; `AppError` becomes an `is_error` result with its client-safe `Display` (never `Persist` details)
+- Resource `healthcheck://status` (application/json) = live `AppState::status()`
+- Tool input schemas come from `schemars::JsonSchema`, derived on `Service`, `CheckType` + its structs and `Settings` — keep the derive on any new config/check type
 
 **`telegram.rs`** — thin wrapper around the Telegram Bot HTTP API using `reqwest`.
 
@@ -77,7 +84,7 @@ AngularJS single-page app embedded into the binary. It reads the public `/api/st
 ### Adding a new check type
 
 1. Add struct + `async fn check(&self) -> State` in `checks.rs`, and a match arm in `CheckType::run()`
-2. Add variant to `CheckType` enum (keep `#[serde(rename_all = "camelCase")]`)
+2. Add variant to `CheckType` enum (keep `#[serde(rename_all = "camelCase")]`; derive `JsonSchema` on the new struct for the MCP tool schemas)
 3. Add UI section in `frontend/index.html` and `frontend/index.js`
 4. Add its rules to `validate.rs` (`check_rules`)
 5. Document it in `README.md` (Check Types) and add a test

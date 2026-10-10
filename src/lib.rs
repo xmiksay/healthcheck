@@ -1,6 +1,7 @@
 pub mod checks;
 pub mod config;
 pub mod error;
+pub mod mcp;
 pub mod notify;
 pub mod state;
 pub mod telegram;

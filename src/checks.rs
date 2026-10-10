@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// Default per-check timeout for HTTP and certificate checks.
@@ -32,7 +33,7 @@ pub fn error_chain(err: &(dyn std::error::Error + 'static)) -> String {
     out
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, Hash)]
+#[derive(Deserialize, Serialize, Debug, Clone, Hash, JsonSchema)]
 pub struct ServiceHttp {
     pub url: String,
     pub expected_status: Option<u16>,
@@ -72,7 +73,7 @@ impl ServiceHttp {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, Hash)]
+#[derive(Deserialize, Serialize, Debug, Clone, Hash, JsonSchema)]
 pub struct ServiceCertificate {
     pub host: String,
     pub port: u16,
@@ -165,7 +166,7 @@ impl ServiceCertificate {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, Hash)]
+#[derive(Deserialize, Serialize, Debug, Clone, Hash, JsonSchema)]
 pub struct ServiceTcpPing {
     pub host: String,
     pub port: u16,
@@ -187,7 +188,7 @@ impl ServiceTcpPing {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, Hash)]
+#[derive(Deserialize, Serialize, Debug, Clone, Hash, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum CheckType {
     Http(ServiceHttp),

@@ -67,13 +67,14 @@ async fn serve_asset(uri: Uri) -> Response {
 }
 
 /// Full application router: public API, admin API (behind `auth::require_admin`)
-/// and the embedded frontend. Further admin surfaces (e.g. `/mcp`) should be
-/// merged into the admin part so they share the same auth layer.
+/// the MCP endpoint (same auth) and the embedded frontend.
 pub fn create_router(app_state: AppState) -> Router {
-    let admin = admin::router().route_layer(middleware::from_fn_with_state(
-        app_state.clone(),
-        auth::require_admin,
-    ));
+    let admin = admin::router()
+        .merge(crate::mcp::router(app_state.clone()))
+        .route_layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            auth::require_admin,
+        ));
 
     Router::new()
         .merge(public::router())
