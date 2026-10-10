@@ -1,5 +1,6 @@
 pub mod checks;
 pub mod config;
+pub mod notify;
 pub mod state;
 pub mod telegram;
 pub mod web;

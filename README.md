@@ -22,7 +22,7 @@ A comprehensive Rust-based service monitoring application with real-time web das
 ### Telegram Notifications
 - **Smart Alerting**: Notify after N consecutive failures (configurable)
 - **Periodic Re-notifications**: Re-alert every N failures to ensure awareness
-- **Recovery Notifications**: Sent when a service that was alerted on recovers (short blips stay silent)
+- **Recovery Notifications**: Sent only when an alert for the outage was actually delivered (short blips stay silent; a failed alert send is retried)
 - **Root-Cause Reasons**: Alerts carry the full error chain (DNS failure, connection refused, timeout, TLS error)
 - **HTML Formatting**: Rich message formatting with emojis (🚨 alerts, ✅ recovery)
 
@@ -41,7 +41,8 @@ A comprehensive Rust-based service monitoring application with real-time web das
 - **[src/lib.rs](src/lib.rs)**: Shared library exports
 - **[src/checks.rs](src/checks.rs)**: Health check implementations (http / certificate / tcpPing) and `State`
 - **[src/config.rs](src/config.rs)**: YAML configuration model and the per-service monitor loop
-- **[src/state.rs](src/state.rs)**: Runtime state, notification policy (`apply_check`), `AppState`
+- **[src/notify.rs](src/notify.rs)**: Per-service runtime state and notification policy (`apply_check`)
+- **[src/state.rs](src/state.rs)**: `AppState` — shared config, live state and monitor tasks
 - **[src/web.rs](src/web.rs)**: REST API and static file serving (Axum framework)
 - **[src/telegram.rs](src/telegram.rs)**: Telegram Bot API integration (reqwest-based)
 - **[src/bin/healthcheck.rs](src/bin/healthcheck.rs)**: Server entry point

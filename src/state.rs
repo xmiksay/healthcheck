@@ -1,126 +1,12 @@
 use std::{collections::HashMap, sync::Arc};
 
-use chrono::{DateTime, Duration, Utc};
-use serde::{Deserialize, Serialize};
+use chrono::Utc;
 use tokio::sync::RwLock;
 
 use crate::checks::State;
-use crate::config::{Config, Service};
+use crate::config::Config;
+use crate::notify::{apply_check, Notification, NotifyPolicy, ServiceState};
 use crate::telegram::TelegramClient;
-
-/// Runtime state of one monitored service, as exposed by `GET /api/services`.
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct ServiceState {
-    pub name: String,
-    pub description: String,
-    pub state: State,
-    pub last_check: DateTime<Utc>,
-    pub consecutive_failures: u64,
-    pub total_checks: u64,
-    pub successful_checks: u64,
-    pub failed_checks: u64,
-    pub uptime_start: Option<DateTime<Utc>>,
-    #[serde(default)]
-    pub failing_since: Option<DateTime<Utc>>,
-}
-
-impl ServiceState {
-    fn new(service: &Service, now: DateTime<Utc>) -> Self {
-        Self {
-            name: service.name.clone(),
-            description: service.description.clone(),
-            state: State::Unknown,
-            last_check: now,
-            consecutive_failures: 0,
-            total_checks: 0,
-            successful_checks: 0,
-            failed_checks: 0,
-            uptime_start: None,
-            failing_since: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Notification {
-    Alert(String),
-    Recovery(String),
-}
-
-/// Thresholds that decide when a state change turns into a Telegram message.
-#[derive(Debug, Clone, Copy)]
-pub struct NotifyPolicy {
-    pub notify_failures: u64,
-    pub rereport: u64,
-}
-
-/// Applies a check result to the service state and decides whether to notify.
-///
-/// A recovery is only announced when an alert was actually sent (the failure
-/// streak reached `notify_failures`); shorter blips are counted but stay silent.
-pub fn apply_check(
-    service: &mut ServiceState,
-    state: &State,
-    now: DateTime<Utc>,
-    policy: NotifyPolicy,
-) -> Option<Notification> {
-    let previous_failures = service.consecutive_failures;
-    service.state = state.clone();
-    service.last_check = now;
-    service.total_checks += 1;
-
-    match state {
-        State::Success => {
-            service.consecutive_failures = 0;
-            service.successful_checks += 1;
-            let failing_since = service.failing_since.take();
-            if service.uptime_start.is_none() {
-                service.uptime_start = Some(now);
-            }
-            if previous_failures >= policy.notify_failures {
-                let downtime = failing_since
-                    .map(|since| format!(" ({})", format_duration(now - since)))
-                    .unwrap_or_default();
-                Some(Notification::Recovery(format!(
-                    "recovered after {} failed checks{}",
-                    previous_failures, downtime
-                )))
-            } else {
-                None
-            }
-        }
-        State::Failure(reason) => {
-            service.consecutive_failures += 1;
-            service.failed_checks += 1;
-            service.uptime_start = None;
-            service.failing_since.get_or_insert(now);
-
-            let failures = service.consecutive_failures;
-            if failures == policy.notify_failures {
-                Some(Notification::Alert(reason.clone()))
-            } else if failures > policy.notify_failures
-                && policy.rereport > 0
-                && (failures - policy.notify_failures).is_multiple_of(policy.rereport)
-            {
-                Some(Notification::Alert(format!("{} (still failing)", reason)))
-            } else {
-                None
-            }
-        }
-        State::Unknown => None,
-    }
-}
-
-fn format_duration(d: Duration) -> String {
-    let secs = d.num_seconds().max(0);
-    if secs < 60 {
-        format!("{}s", secs)
-    } else if secs < 3600 {
-        format!("{}m {}s", secs / 60, secs % 60)
-    } else {
-        format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
-    }
-}
 
 /// Shared runtime state: config, live per-service state and the monitor task handles.
 #[derive(Clone)]
@@ -191,8 +77,14 @@ impl AppState {
                     self.telegram.send_alert(chat_id, &service_name, msg).await
                 }
             };
-            if let Err(e) = result {
-                tracing::error!("Failed to send Telegram notification: {}", e);
+            match result {
+                Ok(()) if matches!(notification, Notification::Alert(_)) => {
+                    if let Some(s) = self.services.write().await.get_mut(&id) {
+                        s.alerted = true;
+                    }
+                }
+                Ok(()) => {}
+                Err(e) => tracing::error!("Failed to send Telegram notification: {}", e),
             }
         }
     }
@@ -272,111 +164,5 @@ impl AppState {
         self.start_monitoring_tasks().await;
         tracing::info!("Configuration updated and tasks restarted");
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn fresh() -> ServiceState {
-        ServiceState {
-            name: "svc".into(),
-            description: String::new(),
-            state: State::Unknown,
-            last_check: Utc::now(),
-            consecutive_failures: 0,
-            total_checks: 0,
-            successful_checks: 0,
-            failed_checks: 0,
-            uptime_start: None,
-            failing_since: None,
-        }
-    }
-
-    const POLICY: NotifyPolicy = NotifyPolicy {
-        notify_failures: 3,
-        rereport: 10,
-    };
-
-    fn fail() -> State {
-        State::Failure("boom".into())
-    }
-
-    #[test]
-    fn single_blip_is_silent() {
-        let mut s = fresh();
-        let t0 = Utc::now();
-        assert_eq!(apply_check(&mut s, &State::Success, t0, POLICY), None);
-        assert_eq!(apply_check(&mut s, &fail(), t0, POLICY), None);
-        assert_eq!(apply_check(&mut s, &State::Success, t0, POLICY), None);
-        assert_eq!(s.failed_checks, 1);
-        assert_eq!(s.consecutive_failures, 0);
-        assert!(s.failing_since.is_none());
-    }
-
-    #[test]
-    fn alert_then_recovery_with_duration() {
-        let mut s = fresh();
-        let t0 = Utc::now();
-        assert_eq!(apply_check(&mut s, &fail(), t0, POLICY), None);
-        assert_eq!(apply_check(&mut s, &fail(), t0, POLICY), None);
-        assert_eq!(
-            apply_check(&mut s, &fail(), t0, POLICY),
-            Some(Notification::Alert("boom".into()))
-        );
-        assert_eq!(s.failing_since, Some(t0));
-        assert!(s.uptime_start.is_none());
-
-        let t1 = t0 + Duration::seconds(150);
-        assert_eq!(
-            apply_check(&mut s, &State::Success, t1, POLICY),
-            Some(Notification::Recovery(
-                "recovered after 3 failed checks (2m 30s)".into()
-            ))
-        );
-        assert_eq!(s.uptime_start, Some(t1));
-        assert!(s.failing_since.is_none());
-    }
-
-    #[test]
-    fn rereport_every_n_failures_after_alert() {
-        let mut s = fresh();
-        let t0 = Utc::now();
-        let mut alerts = Vec::new();
-        for _ in 0..24 {
-            if let Some(n) = apply_check(&mut s, &fail(), t0, POLICY) {
-                alerts.push((s.consecutive_failures, n));
-            }
-        }
-        assert_eq!(
-            alerts,
-            vec![
-                (3, Notification::Alert("boom".into())),
-                (13, Notification::Alert("boom (still failing)".into())),
-                (23, Notification::Alert("boom (still failing)".into())),
-            ]
-        );
-    }
-
-    #[test]
-    fn rereport_zero_never_repeats() {
-        let policy = NotifyPolicy {
-            notify_failures: 1,
-            rereport: 0,
-        };
-        let mut s = fresh();
-        let t0 = Utc::now();
-        assert!(apply_check(&mut s, &fail(), t0, policy).is_some());
-        for _ in 0..5 {
-            assert_eq!(apply_check(&mut s, &fail(), t0, policy), None);
-        }
-    }
-
-    #[test]
-    fn duration_formatting() {
-        assert_eq!(format_duration(Duration::seconds(45)), "45s");
-        assert_eq!(format_duration(Duration::seconds(125)), "2m 5s");
-        assert_eq!(format_duration(Duration::seconds(3_725)), "1h 2m");
     }
 }

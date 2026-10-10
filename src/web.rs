@@ -10,7 +10,8 @@ use rust_embed::RustEmbed;
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::config::Config;
-use crate::state::{AppState, ServiceState};
+use crate::notify::ServiceState;
+use crate::state::AppState;
 
 #[derive(RustEmbed)]
 #[folder = "frontend/"]
