@@ -7,10 +7,12 @@ use crate::config::Service;
 /// Runtime state of one monitored service.
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct ServiceState {
+    pub id: String,
     pub name: String,
     pub description: String,
     pub state: State,
-    pub last_check: DateTime<Utc>,
+    /// `None` until the first check completes.
+    pub last_check: Option<DateTime<Utc>>,
     pub consecutive_failures: u64,
     pub total_checks: u64,
     pub successful_checks: u64,
@@ -24,12 +26,13 @@ pub struct ServiceState {
 }
 
 impl ServiceState {
-    pub fn new(service: &Service, now: DateTime<Utc>) -> Self {
+    pub fn new(id: &str, service: &Service) -> Self {
         Self {
+            id: id.to_string(),
             name: service.name.clone(),
             description: service.description.clone(),
             state: State::Unknown,
-            last_check: now,
+            last_check: None,
             consecutive_failures: 0,
             total_checks: 0,
             successful_checks: 0,
@@ -68,7 +71,7 @@ pub fn apply_check(
     policy: NotifyPolicy,
 ) -> Option<Notification> {
     service.state = state.clone();
-    service.last_check = now;
+    service.last_check = Some(now);
     service.total_checks += 1;
 
     match state {
@@ -127,10 +130,11 @@ mod tests {
 
     fn fresh() -> ServiceState {
         ServiceState {
+            id: "svc".into(),
             name: "svc".into(),
             description: String::new(),
             state: State::Unknown,
-            last_check: Utc::now(),
+            last_check: None,
             consecutive_failures: 0,
             total_checks: 0,
             successful_checks: 0,
@@ -191,6 +195,7 @@ mod tests {
         );
         s.alerted = true;
         assert_eq!(s.failing_since, Some(t0));
+        assert_eq!(s.last_check, Some(t0));
         assert!(s.uptime_start.is_none());
 
         let t1 = t0 + Duration::seconds(150);
