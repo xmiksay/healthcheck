@@ -12,14 +12,14 @@ rereport: 10                   # Re-notify every 10 failures
 
 # Web server port for frontend and API
 web_port: 8080
-# Frontend path
-frontend_path: "./frontend"
-# Optional: Bearer token for API authentication
-# If set, /api/config endpoint will require this token in Authorization header
+# Bearer token for the admin API (settings, service CRUD, check runs).
+# Unset = admin API disabled (403); the public status page keeps working.
+# telegram_token, api_bearer_token and web_port are file-only: never exposed or
+# writable through the API.
 # api_bearer_token: "your-secret-token-here"
 
 # Services to monitor
-# Each service must have a unique identifier (can be any string)
+# Each service needs a unique ID matching ^[a-z0-9][a-z0-9_-]{0,63}$
 services:
   # Example 1: HTTP health check
   example-website:
@@ -110,6 +110,7 @@ services:
 #   !http          - HTTP/HTTPS endpoint monitoring
 #     - url: string (required)
 #     - expected_status: number (optional, default: 200)
+#     - timeout_ms: number (optional, default: 10000)
 #
 #   !tcpPing       - TCP connectivity check
 #     - host: string (required)
@@ -120,6 +121,10 @@ services:
 #     - host: string (required)
 #     - port: number (required)
 #     - days_before_expiry: number (optional, default: 30)
+#     - timeout_ms: number (optional, default: 10000)
 
-# Service identifiers can be any unique string (e.g., "my-service", "prod-api", "db-primary")
-# Use the "Add New Service" button in the web UI for automatic ID generation
+# Validation (enforced at startup and on every API write):
+#   - service IDs: lowercase letters, digits, "_" and "-", starting with a letter/digit, max 64
+#   - intervals >= 1000 ms, notify_failures >= 1, rereport >= 0 (0 = never re-alert)
+#   - timeout_ms 100..=300000, expected_status 100..=599, port 1..=65535, host/name non-empty
+#   - http url must be http:// or https://

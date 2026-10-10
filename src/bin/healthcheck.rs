@@ -34,6 +34,14 @@ async fn main() -> anyhow::Result<()> {
         config.services.len()
     );
 
+    if config
+        .api_bearer_token
+        .as_deref()
+        .is_none_or(|t| t.trim().is_empty())
+    {
+        tracing::warn!("api_bearer_token is not set: admin API is disabled (403)");
+    }
+
     // Create application state
     let app_state = AppState::new(config.clone(), config_path);
 

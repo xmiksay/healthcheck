@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <title>Service Health Monitor</title>
     <script src="./angular.js"></script>
+    <script src="./api.js"></script>
     <script src="./index.js"></script>
     <link rel="stylesheet" href="index.css">
   </head>
@@ -25,7 +26,7 @@
           {{healthCheck.showConfigEditor ? 'Hide' : 'Edit'}} Configuration
         </button>
         <label>
-          <input type="checkbox" ng-model="healthCheck.autoRefresh">
+          <input type="checkbox" ng-model="healthCheck.autoRefresh" ng-change="healthCheck.setupAutoRefresh()">
           Auto-refresh every 5 seconds
         </label>
       </div>
@@ -42,9 +43,9 @@
         </div>
 
         <!-- Bearer Token Prompt -->
-        <div class="bearer-prompt" ng-if="healthCheck.showBearerPrompt">
+        <div class="bearer-prompt" ng-if="healthCheck.showBearerPrompt && !healthCheck.adminDisabled">
           <h3>Authentication Required</h3>
-          <p>This configuration is protected. Please enter the bearer token:</p>
+          <p>The admin API is protected. Please enter the bearer token:</p>
           <div class="bearer-input-group">
             <input type="password" ng-model="healthCheck.bearerToken" placeholder="Enter bearer token" class="bearer-input">
             <button ng-click="healthCheck.saveBearerToken()" class="bearer-btn">Submit</button>
@@ -52,25 +53,9 @@
           </div>
         </div>
 
-        <div class="config-tabs">
-          <button
-            ng-click="healthCheck.configEditorMode = 'visual'"
-            ng-class="{active: healthCheck.configEditorMode === 'visual'}"
-            class="tab-btn">
-            Visual Editor
-          </button>
-          <button
-            ng-click="healthCheck.configEditorMode = 'raw'"
-            ng-class="{active: healthCheck.configEditorMode === 'raw'}"
-            class="tab-btn">
-            Raw Editor
-          </button>
-        </div>
-
-        <!-- Visual Editor -->
-        <div ng-if="healthCheck.configEditorMode === 'visual'" class="visual-editor">
+        <div ng-if="healthCheck.editorLoaded && !healthCheck.adminDisabled" class="visual-editor">
           <div class="config-help">
-            <p><strong>Note:</strong> Edit the configuration using the form below. Changes will restart all monitoring tasks.</p>
+            <p><strong>Note:</strong> Global settings and each service are saved separately. Saving a service restarts only that service's check. Telegram token, API token and web port are set in the config file only.</p>
           </div>
 
           <!-- Global Settings -->
@@ -78,37 +63,28 @@
             <h3>Global Settings</h3>
             <div class="form-grid">
               <div class="form-group">
-                <label>Telegram Bot Token:</label>
-                <input type="text" ng-model="healthCheck.editConfig.telegram_token" placeholder="Bot token">
-              </div>
-              <div class="form-group">
                 <label>Telegram Chat ID:</label>
-                <input type="number" ng-model="healthCheck.editConfig.telegram_chat_id" placeholder="Chat ID">
+                <input type="number" ng-model="healthCheck.settings.telegram_chat_id" placeholder="Chat ID">
               </div>
               <div class="form-group">
                 <label>Check Interval Success (ms):</label>
-                <input type="number" ng-model="healthCheck.editConfig.check_interval_success" placeholder="10000">
+                <input type="number" ng-model="healthCheck.settings.check_interval_success" placeholder="10000">
               </div>
               <div class="form-group">
                 <label>Check Interval Fail (ms):</label>
-                <input type="number" ng-model="healthCheck.editConfig.check_interval_fail" placeholder="10000">
+                <input type="number" ng-model="healthCheck.settings.check_interval_fail" placeholder="10000">
               </div>
               <div class="form-group">
                 <label>Notify After Failures:</label>
-                <input type="number" ng-model="healthCheck.editConfig.notify_failures" placeholder="3">
+                <input type="number" ng-model="healthCheck.settings.notify_failures" placeholder="3">
               </div>
               <div class="form-group">
-                <label>Rereport Every N Failures:</label>
-                <input type="number" ng-model="healthCheck.editConfig.rereport" placeholder="10">
+                <label>Rereport Every N Failures (0 = never):</label>
+                <input type="number" ng-model="healthCheck.settings.rereport" placeholder="10">
               </div>
-              <div class="form-group">
-                <label>Web Port:</label>
-                <input type="number" ng-model="healthCheck.editConfig.web_port" placeholder="8080">
-              </div>
-              <div class="form-group">
-                <label>API Bearer Token:</label>
-                <input type="text" ng-model="healthCheck.editConfig.api_bearer_token" placeholder="your-secret-token">
-              </div>
+            </div>
+            <div class="config-buttons">
+              <button ng-click="healthCheck.saveSettings()" class="save-btn">Save Settings</button>
             </div>
           </div>
 
@@ -116,15 +92,29 @@
           <div class="config-section">
             <h3>Services</h3>
             <button ng-click="healthCheck.addNewService()" class="add-service-btn">+ Add New Service</button>
+            <button ng-click="healthCheck.reloadEditor()" class="cancel-btn">Discard Unsaved Changes</button>
 
             <div class="services-list">
-              <div ng-repeat="(uuid, service) in healthCheck.editConfig.services" class="service-editor">
+              <div ng-repeat="service in healthCheck.editServices" class="service-editor">
                 <div class="service-header">
-                  <h4>{{service.name || 'New Service'}}</h4>
-                  <button ng-click="healthCheck.removeService(uuid)" class="delete-service-btn">Delete</button>
+                  <h4>
+                    {{service.name || 'New Service'}}
+                    <span class="service-id" ng-if="!service.isNew">{{service.id}}</span>
+                    <span ng-if="service.status" class="status-indicator status-{{healthCheck.getStateClass(service.status.state)}}">
+                      {{healthCheck.getStateLabel(service.status.state)}}
+                    </span>
+                  </h4>
+                  <button ng-click="healthCheck.removeService(service)" ng-disabled="service.busy" class="delete-service-btn">Delete</button>
                 </div>
 
-                <div class="form-grid">
+                <ng-form name="serviceForm" class="form-grid">
+                  <div class="form-group" ng-if="service.isNew">
+                    <label>ID:</label>
+                    <input type="text" name="id" ng-model="service.id" ng-pattern="healthCheck.idPattern" placeholder="my-service" required>
+                    <small class="field-hint" ng-class="{invalid: serviceForm.id.$invalid && serviceForm.id.$dirty}">
+                      Lowercase letters, digits, "-" and "_"; must start with a letter or digit; max 64 chars. Cannot be changed later.
+                    </small>
+                  </div>
                   <div class="form-group">
                     <label>Enabled:</label>
                     <input type="checkbox" ng-model="service.enabled">
@@ -145,7 +135,7 @@
                       <option value="tcpPing">TCP Ping</option>
                     </select>
                   </div>
-                </div>
+                </ng-form>
 
                 <!-- HTTP Check -->
                 <div ng-if="service.checkType === 'http'" class="check-config">
@@ -158,6 +148,10 @@
                     <div class="form-group">
                       <label>Expected Status Code:</label>
                       <input type="number" ng-model="service.check.http.expected_status" placeholder="200">
+                    </div>
+                    <div class="form-group">
+                      <label>Timeout (ms):</label>
+                      <input type="number" ng-model="service.check.http.timeout_ms" placeholder="10000">
                     </div>
                   </div>
                 </div>
@@ -177,6 +171,10 @@
                     <div class="form-group">
                       <label>Days Before Expiry:</label>
                       <input type="number" ng-model="service.check.certificate.days_before_expiry" placeholder="30">
+                    </div>
+                    <div class="form-group">
+                      <label>Timeout (ms):</label>
+                      <input type="number" ng-model="service.check.certificate.timeout_ms" placeholder="10000">
                     </div>
                   </div>
                 </div>
@@ -219,7 +217,7 @@
                       <input type="number" ng-model="service.notify_failures" placeholder="Use global">
                     </div>
                     <div class="form-group">
-                      <label>Rereport Every N Failures:</label>
+                      <label>Rereport Every N Failures (0 = never):</label>
                       <input type="number" ng-model="service.rereport" placeholder="Use global">
                     </div>
                     <div class="form-group">
@@ -228,26 +226,26 @@
                     </div>
                   </div>
                 </div>
+
+                <div class="config-error" ng-if="service.error">{{service.error}}</div>
+                <div class="config-success" ng-if="service.notice">{{service.notice}}</div>
+                <div class="check-result" ng-if="service.result">
+                  Result:
+                  <span class="status-indicator status-{{healthCheck.getStateClass(service.result)}}">
+                    {{healthCheck.getStateLabel(service.result)}}
+                  </span>
+                </div>
+
+                <div class="config-buttons service-actions">
+                  <button ng-click="healthCheck.saveService(service)" ng-disabled="service.busy" class="save-btn">
+                    {{service.isNew ? 'Create Service' : 'Save Service'}}
+                  </button>
+                  <button ng-click="healthCheck.testService(service)" ng-disabled="service.busy">Test</button>
+                  <button ng-if="!service.isNew" ng-click="healthCheck.checkNow(service)" ng-disabled="service.busy">Check Now (saved)</button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-
-        <!-- Raw Editor -->
-        <div ng-if="healthCheck.configEditorMode === 'raw'" class="raw-editor">
-          <div class="config-help">
-            <p><strong>Note:</strong> Edit the YAML configuration below. Changes will restart all monitoring tasks.</p>
-          </div>
-
-          <textarea
-            ng-model="healthCheck.configJson"
-            class="config-textarea"
-            placeholder="Loading configuration..."></textarea>
-        </div>
-
-        <div class="config-buttons">
-          <button ng-click="healthCheck.saveConfig()" class="save-btn">Save Configuration</button>
-          <button ng-click="healthCheck.cancelConfigEdit()" class="cancel-btn">Cancel</button>
         </div>
       </div>
 
@@ -266,7 +264,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr ng-repeat="service in healthCheck.services"
+          <tr ng-repeat="service in healthCheck.services track by service.id"
               class="service-row state-{{healthCheck.getStateClass(service.state)}}">
             <td class="status-cell">
               <span class="status-indicator status-{{healthCheck.getStateClass(service.state)}}">
@@ -279,13 +277,16 @@
               <span ng-if="service.uptime_start">{{healthCheck.getUptime(service.uptime_start)}}</span>
               <span ng-if="!service.uptime_start" class="no-uptime">-</span>
             </td>
-            <td class="time-cell">{{service.last_check | date:'yyyy-MM-dd HH:mm:ss'}}</td>
+            <td class="time-cell">
+              <span ng-if="service.last_check">{{service.last_check | date:'yyyy-MM-dd HH:mm:ss'}}</span>
+              <span ng-if="!service.last_check" class="never">never</span>
+            </td>
           </tr>
         </tbody>
       </table>
 
       <div ng-if="healthCheck.services.length === 0 && !healthCheck.error" class="no-services">
-        No services configured
+        No enabled services
       </div>
     </div>
   </body>

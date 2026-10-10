@@ -1,9 +1,13 @@
+use std::time::Duration;
+
 use serde::Serialize;
+
+/// A send must never hang a monitor loop, which awaits it before its next check.
+const SEND_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone)]
 pub struct TelegramClient {
     bot_token: String,
-    chat_id: i64,
     client: reqwest::Client,
 }
 
@@ -16,10 +20,9 @@ struct SendMessageRequest {
 }
 
 impl TelegramClient {
-    pub fn new(bot_token: String, chat_id: i64) -> Self {
+    pub fn new(bot_token: String) -> Self {
         Self {
             bot_token,
-            chat_id,
             client: reqwest::Client::new(),
         }
     }
@@ -35,8 +38,10 @@ impl TelegramClient {
 
         tracing::debug!("Sending Telegram message to chat_id: {}", chat_id);
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
+            .timeout(SEND_TIMEOUT)
             .json(&request)
             .send()
             .await?;
@@ -46,42 +51,69 @@ impl TelegramClient {
             Ok(())
         } else {
             let status = response.status();
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-            tracing::error!("Failed to send Telegram message: {} - {}", status, error_text);
-            Err(anyhow::anyhow!("Telegram API error: {} - {}", status, error_text))
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            tracing::error!(
+                "Failed to send Telegram message: {} - {}",
+                status,
+                error_text
+            );
+            Err(anyhow::anyhow!(
+                "Telegram API error: {} - {}",
+                status,
+                error_text
+            ))
         }
     }
 
-    pub async fn send_message(&self, text: &str) -> anyhow::Result<()> {
-        self.send_message_to(self.chat_id, text).await
-    }
-
-    pub async fn send_alert(&self, chat_id: i64, service_name: &str, message: &str) -> anyhow::Result<()> {
+    pub async fn send_alert(
+        &self,
+        chat_id: i64,
+        service_name: &str,
+        message: &str,
+    ) -> anyhow::Result<()> {
         let formatted_message = format!(
             "🚨 <b>Alert: {}</b>\n\n{}",
-            service_name,
-            message
+            escape_html(service_name),
+            escape_html(message)
         );
         self.send_message_to(chat_id, &formatted_message).await
     }
 
-    pub async fn send_recovery(&self, chat_id: i64, service_name: &str, message: &str) -> anyhow::Result<()> {
+    pub async fn send_recovery(
+        &self,
+        chat_id: i64,
+        service_name: &str,
+        message: &str,
+    ) -> anyhow::Result<()> {
         let formatted_message = format!(
             "✅ <b>Recovery: {}</b>\n\n{}",
-            service_name,
-            message
+            escape_html(service_name),
+            escape_html(message)
         );
         self.send_message_to(chat_id, &formatted_message).await
     }
+}
+
+/// Telegram's HTML parse mode rejects the whole message on a stray `&`, `<` or `>`,
+/// which failure reasons (URLs, error text) routinely contain.
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_create_client() {
-        let client = TelegramClient::new("test_token".to_string(), 12345);
-        assert_eq!(client.chat_id, 12345);
+    #[test]
+    fn escapes_html_entities() {
+        assert_eq!(
+            escape_html("R&D <api> https://h/?a=1&b=2"),
+            "R&amp;D &lt;api&gt; https://h/?a=1&amp;b=2"
+        );
     }
 }

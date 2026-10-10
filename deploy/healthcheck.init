@@ -1,0 +1,20 @@
+#!/bin/sh /etc/rc.common
+# OpenWrt/Turris procd init script for healthcheck.
+# Install: cp deploy/healthcheck.init /etc/init.d/healthcheck && chmod +x /etc/init.d/healthcheck
+#          /etc/init.d/healthcheck enable && /etc/init.d/healthcheck restart
+# Logs:    logread -e healthcheck
+USE_PROCD=1
+START=95
+STOP=01
+
+start_service() {
+    procd_open_instance
+    procd_set_param command /usr/bin/healthcheck
+    procd_set_param env HEALTHCHECK_CONFIG=/etc/healthcheck.yml
+    # stdout/stderr must be set before procd_close_instance, otherwise the
+    # binary's log output never reaches logread.
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_set_param respawn
+    procd_close_instance
+}

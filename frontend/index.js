@@ -1,416 +1,357 @@
-angular.module('healthCheckApp', [])
-  .controller('HealthCheckController', ['$http', '$interval', '$timeout', function($http, $interval, $timeout) {
+angular.module('healthCheckApp')
+  .controller('HealthCheckController', ['api', '$q', '$interval', function(api, $q, $interval) {
     var healthCheck = this;
 
-    // Configuration
-    var API_URL = '/api/services';
-    var CONFIG_URL = '/api/config';
     var REFRESH_INTERVAL = 5000; // 5 seconds
+    var ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+    var SETTINGS_FIELDS = ['check_interval_success', 'check_interval_fail', 'notify_failures', 'rereport', 'telegram_chat_id'];
+    // Per-service overrides use the same names as the global settings.
+    var OVERRIDE_FIELDS = SETTINGS_FIELDS;
 
-    // State
+    // Dashboard state
     healthCheck.services = [];
     healthCheck.error = null;
     healthCheck.lastUpdate = null;
     healthCheck.autoRefresh = true;
+
+    // Editor state
+    healthCheck.idPattern = ID_PATTERN;
     healthCheck.showConfigEditor = false;
-    healthCheck.configEditorMode = 'visual';
-    healthCheck.config = null;
-    healthCheck.editConfig = null;
-    healthCheck.configJson = '';
+    healthCheck.editorLoaded = false;
+    healthCheck.adminDisabled = false;
+    healthCheck.settings = null;
+    healthCheck.editServices = [];
     healthCheck.configError = null;
     healthCheck.configSuccess = null;
     healthCheck.showBearerPrompt = false;
     healthCheck.bearerToken = '';
     var refreshTimer = null;
 
-    // Get bearer token from localStorage
-    function getBearerToken() {
-      return localStorage.getItem('healthcheck_bearer_token') || '';
+    // Optional fields are only sent when set; 0 is a valid value (rereport).
+    function isSet(value) {
+      return value !== null && value !== undefined && value !== '';
     }
 
-    // Set bearer token in localStorage
-    function setBearerToken(token) {
-      if (token) {
-        localStorage.setItem('healthcheck_bearer_token', token);
+    function copyFields(src, dst, fields) {
+      fields.forEach(function(field) {
+        if (isSet(src[field])) {
+          dst[field] = src[field];
+        }
+      });
+      return dst;
+    }
+
+    // Central admin error handling: 401 asks for a token, 403 locks the editor,
+    // anything else is surfaced via the caller-provided setter.
+    function handleAdminError(error, setMessage) {
+      if (error.status === 401) {
+        healthCheck.showBearerPrompt = true;
+        healthCheck.bearerToken = api.getToken();
+        setMessage('Authentication required: ' + error.message);
+      } else if (error.status === 403) {
+        healthCheck.adminDisabled = true;
+        healthCheck.configError = 'Admin API disabled on server: set api_bearer_token in the config file';
       } else {
-        localStorage.removeItem('healthcheck_bearer_token');
+        setMessage(error.message);
       }
+      console.error('API error:', error);
     }
 
-    // Get HTTP config with auth header if bearer token exists
-    function getHttpConfig() {
-      var token = getBearerToken();
-      if (token) {
-        return {
-          headers: {
-            'Authorization': 'Bearer ' + token
-          }
-        };
-      }
-      return {};
+    function setConfigError(message) {
+      healthCheck.configError = message;
     }
 
-    // Load services from API
+    // ---- Dashboard ----
+
     healthCheck.loadServices = function() {
-      $http.get(API_URL)
-        .then(function(response) {
-          healthCheck.services = response.data;
+      api.status()
+        .then(function(statuses) {
+          healthCheck.services = statuses;
           healthCheck.error = null;
           healthCheck.lastUpdate = new Date();
         })
         .catch(function(error) {
-          healthCheck.error = error.statusText || 'Failed to load services';
-          console.error('Error loading services:', error);
+          healthCheck.error = error.message;
         });
     };
 
-    // Manual refresh
-    healthCheck.refresh = function() {
-      healthCheck.loadServices();
-    };
+    healthCheck.refresh = healthCheck.loadServices;
 
-    // Load configuration from API
-    healthCheck.loadConfig = function() {
-      $http.get(CONFIG_URL, getHttpConfig())
-        .then(function(response) {
-          healthCheck.config = response.data;
-          healthCheck.configJson = JSON.stringify(response.data, null, 2);
-          healthCheck.editConfig = healthCheck.parseConfigForVisualEditor(response.data);
-          healthCheck.configError = null;
+    // ---- Editor: conversion between API shapes and form models ----
+
+    function checkToForm(check) {
+      check = check || {};
+      var type = Object.keys(check || {})[0] || 'http';
+      var form = { checkType: type, check: {} };
+      form.check[type] = angular.copy(check[type]) || {};
+      return form;
+    }
+
+    function checkFromForm(service) {
+      var type = service.checkType;
+      var src = service.check[type] || {};
+      var out = {};
+      if (type === 'http') {
+        out.http = copyFields(src, { url: src.url }, ['expected_status', 'timeout_ms']);
+      } else if (type === 'certificate') {
+        out.certificate = copyFields(src, { host: src.host, port: src.port }, ['days_before_expiry', 'timeout_ms']);
+      } else if (type === 'tcpPing') {
+        out.tcpPing = copyFields(src, { host: src.host, port: src.port }, ['timeout_ms']);
+      }
+      return out;
+    }
+
+    function serviceToForm(entry) {
+      var form = checkToForm(entry.check);
+      form.id = entry.id;
+      form.isNew = false;
+      form.enabled = entry.enabled;
+      form.name = entry.name;
+      form.description = entry.description;
+      form.status = entry.status;
+      form.showAdvanced = OVERRIDE_FIELDS.some(function(f) { return isSet(entry[f]); });
+      OVERRIDE_FIELDS.forEach(function(f) { form[f] = entry[f]; });
+      return form;
+    }
+
+    function serviceFromForm(form) {
+      var service = {
+        enabled: !!form.enabled,
+        name: form.name || '',
+        description: form.description || '',
+        check: checkFromForm(form)
+      };
+      return copyFields(form, service, OVERRIDE_FIELDS);
+    }
+
+    // ---- Editor: loading ----
+
+    healthCheck.loadEditor = function() {
+      healthCheck.configError = null;
+      $q.all([api.getSettings(), api.listServices()])
+        .then(function(results) {
+          healthCheck.settings = results[0];
+          healthCheck.editServices = results[1].map(serviceToForm);
+          healthCheck.editorLoaded = true;
+          healthCheck.adminDisabled = false;
           healthCheck.showBearerPrompt = false;
         })
         .catch(function(error) {
-          if (error.status === 401) {
-            healthCheck.showBearerPrompt = true;
-            healthCheck.configError = 'Authentication required. Please enter bearer token.';
-          } else {
-            healthCheck.configError = 'Failed to load configuration: ' + (error.statusText || error.message);
-          }
-          console.error('Error loading config:', error);
+          handleAdminError(error, setConfigError);
         });
     };
 
-    // Parse config from API format to visual editor format
-    healthCheck.parseConfigForVisualEditor = function(config) {
-      var editConfig = {
-        telegram_token: config.telegram_token,
-        telegram_chat_id: config.telegram_chat_id,
-        check_interval_success: config.check_interval_success,
-        check_interval_fail: config.check_interval_fail,
-        notify_failures: config.notify_failures,
-        rereport: config.rereport,
-        web_port: config.web_port,
-        frontend_path: config.frontend_path,
-        api_bearer_token: config.api_bearer_token,
-        services: {}
-      };
-
-      // Parse services
-      for (var uuid in config.services) {
-        var service = config.services[uuid];
-        var editService = {
-          enabled: service.enabled,
-          name: service.name,
-          description: service.description,
-          check_interval_success: service.check_interval_success,
-          check_interval_fail: service.check_interval_fail,
-          notify_failures: service.notify_failures,
-          rereport: service.rereport,
-          telegram_chat_id: service.telegram_chat_id || null,
-          showAdvanced: false,
-          check: {}
-        };
-
-        // Determine check type and parse check data
-        if (service.check.http) {
-          editService.checkType = 'http';
-          editService.check.http = {
-            url: service.check.http.url,
-            expected_status: service.check.http.expected_status
-          };
-        } else if (service.check.certificate) {
-          editService.checkType = 'certificate';
-          editService.check.certificate = {
-            host: service.check.certificate.host,
-            port: service.check.certificate.port,
-            days_before_expiry: service.check.certificate.days_before_expiry
-          };
-        } else if (service.check.tcpPing) {
-          editService.checkType = 'tcpPing';
-          editService.check.tcpPing = {
-            host: service.check.tcpPing.host,
-            port: service.check.tcpPing.port,
-            timeout_ms: service.check.tcpPing.timeout_ms
-          };
-        }
-
-        editConfig.services[uuid] = editService;
+    healthCheck.toggleConfigEditor = function() {
+      healthCheck.showConfigEditor = !healthCheck.showConfigEditor;
+      healthCheck.configError = null;
+      healthCheck.configSuccess = null;
+      if (healthCheck.showConfigEditor && !healthCheck.editorLoaded) {
+        healthCheck.loadEditor();
       }
-
-      return editConfig;
     };
 
-    // Convert visual editor format back to API format
-    healthCheck.convertVisualEditorToConfig = function() {
-      var config = {
-        telegram_token: healthCheck.editConfig.telegram_token,
-        telegram_chat_id: healthCheck.editConfig.telegram_chat_id,
-        check_interval_success: healthCheck.editConfig.check_interval_success,
-        check_interval_fail: healthCheck.editConfig.check_interval_fail,
-        notify_failures: healthCheck.editConfig.notify_failures,
-        rereport: healthCheck.editConfig.rereport,
-        web_port: healthCheck.editConfig.web_port,
-        api_bearer_token: healthCheck.editConfig.api_bearer_token,
-        services: {}
-      };
-
-      // Convert services
-      for (var uuid in healthCheck.editConfig.services) {
-        var editService = healthCheck.editConfig.services[uuid];
-        var service = {
-          enabled: editService.enabled,
-          name: editService.name,
-          description: editService.description
-        };
-
-        // Add optional fields only if set
-        if (editService.check_interval_success) {
-          service.check_interval_success = editService.check_interval_success;
-        }
-        if (editService.check_interval_fail) {
-          service.check_interval_fail = editService.check_interval_fail;
-        }
-        if (editService.notify_failures) {
-          service.notify_failures = editService.notify_failures;
-        }
-        if (editService.rereport) {
-          service.rereport = editService.rereport;
-        }
-        if (editService.telegram_chat_id) {
-          service.telegram_chat_id = editService.telegram_chat_id;
-        }
-
-        // Convert check based on type
-        service.check = {};
-        if (editService.checkType === 'http') {
-          service.check.http = {
-            url: editService.check.http.url
-          };
-          if (editService.check.http.expected_status) {
-            service.check.http.expected_status = editService.check.http.expected_status;
-          }
-        } else if (editService.checkType === 'certificate') {
-          service.check.certificate = {
-            host: editService.check.certificate.host,
-            port: editService.check.certificate.port,
-            days_before_expiry: editService.check.certificate.days_before_expiry
-          };
-        } else if (editService.checkType === 'tcpPing') {
-          service.check.tcpPing = {
-            host: editService.check.tcpPing.host,
-            port: editService.check.tcpPing.port,
-            timeout_ms: editService.check.tcpPing.timeout_ms
-          };
-        }
-
-        config.services[uuid] = service;
-      }
-
-      return config;
+    // Discards unsaved edits by reloading from the server.
+    healthCheck.reloadEditor = function() {
+      healthCheck.configSuccess = null;
+      healthCheck.loadEditor();
     };
 
-    // Add new service
+    // ---- Editor: global settings ----
+
+    healthCheck.saveSettings = function() {
+      healthCheck.configError = null;
+      healthCheck.configSuccess = null;
+      var body = {};
+      SETTINGS_FIELDS.forEach(function(f) { body[f] = healthCheck.settings[f]; });
+      api.putSettings(body)
+        .then(function(saved) {
+          healthCheck.settings = saved;
+          healthCheck.configSuccess = 'Global settings saved.';
+        })
+        .catch(function(error) {
+          handleAdminError(error, setConfigError);
+        });
+    };
+
+    // ---- Editor: services ----
+
     healthCheck.addNewService = function() {
-      var newUuid = healthCheck.generateUuid();
-      healthCheck.editConfig.services[newUuid] = {
+      healthCheck.editServices.unshift({
+        id: '',
+        isNew: true,
         enabled: true,
         name: '',
         description: '',
         checkType: 'http',
-        check: {
-          http: {
-            url: '',
-            expected_status: 200
-          }
-        },
+        check: { http: { url: '', expected_status: 200 } },
         showAdvanced: false
-      };
-    };
-
-    // Remove service
-    healthCheck.removeService = function(uuid) {
-      delete healthCheck.editConfig.services[uuid];
-    };
-
-    // Update check type
-    healthCheck.updateCheckType = function(service) {
-      service.check = {};
-      if (service.checkType === 'http') {
-        service.check.http = {
-          url: '',
-          expected_status: 200
-        };
-      } else if (service.checkType === 'certificate') {
-        service.check.certificate = {
-          host: '',
-          port: 443,
-          days_before_expiry: 30
-        };
-      } else if (service.checkType === 'tcpPing') {
-        service.check.tcpPing = {
-          host: '',
-          port: 80,
-          timeout_ms: 3000
-        };
-      }
-    };
-
-    // Generate UUID v4
-    healthCheck.generateUuid = function() {
-      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-        var r = Math.random() * 16 | 0;
-        var v = c === 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
       });
     };
 
-    // Toggle configuration editor
-    healthCheck.toggleConfigEditor = function() {
-      healthCheck.showConfigEditor = !healthCheck.showConfigEditor;
-      if (healthCheck.showConfigEditor && !healthCheck.config) {
-        healthCheck.bearerToken = getBearerToken();
-        healthCheck.loadConfig();
+    healthCheck.updateCheckType = function(service) {
+      service.check = {};
+      service.result = null;
+      if (service.checkType === 'http') {
+        service.check.http = { url: '', expected_status: 200 };
+      } else if (service.checkType === 'certificate') {
+        service.check.certificate = { host: '', port: 443, days_before_expiry: 30 };
+      } else if (service.checkType === 'tcpPing') {
+        service.check.tcpPing = { host: '', port: 80, timeout_ms: 3000 };
       }
-      healthCheck.configError = null;
-      healthCheck.configSuccess = null;
     };
 
-    // Save configuration
-    healthCheck.saveConfig = function() {
-      healthCheck.configError = null;
-      healthCheck.configSuccess = null;
+    function serviceError(service) {
+      return function(message) {
+        service.error = message;
+      };
+    }
 
-      var newConfig;
+    function startAction(service) {
+      service.error = null;
+      service.notice = null;
+      service.busy = true;
+    }
 
-      // Get config based on editor mode
-      if (healthCheck.configEditorMode === 'visual') {
-        try {
-          newConfig = healthCheck.convertVisualEditorToConfig();
-        } catch (e) {
-          healthCheck.configError = 'Invalid configuration: ' + e.message;
+    function endAction(service) {
+      service.busy = false;
+    }
+
+    healthCheck.saveService = function(service) {
+      startAction(service);
+      var body = serviceFromForm(service);
+      var request;
+      if (service.isNew) {
+        if (!ID_PATTERN.test(service.id || '')) {
+          service.error = 'id: must match ^[a-z0-9][a-z0-9_-]{0,63}$';
+          endAction(service);
           return;
         }
+        body.id = service.id;
+        request = api.createService(body);
       } else {
-        // Validate JSON
-        try {
-          newConfig = JSON.parse(healthCheck.configJson);
-        } catch (e) {
-          healthCheck.configError = 'Invalid JSON: ' + e.message;
-          return;
-        }
+        request = api.updateService(service.id, body);
       }
-
-      // Send to API
-      $http.put(CONFIG_URL, newConfig, getHttpConfig())
-        .then(function() {
-          healthCheck.configSuccess = 'Configuration updated successfully! Services are restarting...';
-          healthCheck.config = newConfig;
-          healthCheck.showBearerPrompt = false;
-
-          // Reload services after a short delay
-          $timeout(function() {
-            healthCheck.loadServices();
-            healthCheck.showConfigEditor = false;
-            healthCheck.configSuccess = null;
-          }, 2000);
+      request
+        .then(function(entry) {
+          var index = healthCheck.editServices.indexOf(service);
+          var saved = serviceToForm(entry);
+          saved.showAdvanced = service.showAdvanced;
+          saved.notice = 'Saved.';
+          healthCheck.editServices[index] = saved;
+          healthCheck.loadServices();
         })
         .catch(function(error) {
-          if (error.status === 401) {
-            healthCheck.showBearerPrompt = true;
-            healthCheck.configError = 'Authentication failed. Please check your bearer token.';
-          } else {
-            healthCheck.configError = 'Failed to update configuration: ' + (error.data || error.statusText || error.message);
-          }
-          console.error('Error updating config:', error);
+          handleAdminError(error, serviceError(service));
+        })
+        .finally(function() {
+          endAction(service);
         });
     };
 
-    // Save bearer token
+    healthCheck.removeService = function(service) {
+      var index = healthCheck.editServices.indexOf(service);
+      if (service.isNew) {
+        healthCheck.editServices.splice(index, 1);
+        return;
+      }
+      if (!confirm('Delete service "' + service.id + '"? This cannot be undone.')) {
+        return;
+      }
+      startAction(service);
+      api.deleteService(service.id)
+        .then(function() {
+          healthCheck.editServices.splice(healthCheck.editServices.indexOf(service), 1);
+          healthCheck.loadServices();
+        })
+        .catch(function(error) {
+          handleAdminError(error, serviceError(service));
+        })
+        .finally(function() {
+          endAction(service);
+        });
+    };
+
+    function showResult(service, request) {
+      startAction(service);
+      service.result = null;
+      request()
+        .then(function(response) {
+          service.result = response.state;
+        })
+        .catch(function(error) {
+          handleAdminError(error, serviceError(service));
+        })
+        .finally(function() {
+          endAction(service);
+        });
+    }
+
+    // Runs the check as currently edited, without saving it.
+    healthCheck.testService = function(service) {
+      showResult(service, function() {
+        return api.testCheck(checkFromForm(service));
+      });
+    };
+
+    // Runs the saved check once; not recorded in stats.
+    healthCheck.checkNow = function(service) {
+      showResult(service, function() {
+        return api.checkService(service.id);
+      });
+    };
+
+    // ---- Bearer token ----
+
     healthCheck.saveBearerToken = function() {
-      setBearerToken(healthCheck.bearerToken);
+      api.setToken(healthCheck.bearerToken);
       healthCheck.showBearerPrompt = false;
-      healthCheck.loadConfig();
-    };
-
-    // Clear bearer token
-    healthCheck.clearBearerToken = function() {
-      healthCheck.bearerToken = '';
-      setBearerToken('');
-      healthCheck.showBearerPrompt = false;
-    };
-
-    // Cancel config editing
-    healthCheck.cancelConfigEdit = function() {
-      healthCheck.showConfigEditor = false;
       healthCheck.configError = null;
-      healthCheck.configSuccess = null;
-      if (healthCheck.config) {
-        healthCheck.configJson = JSON.stringify(healthCheck.config, null, 2);
-        healthCheck.editConfig = healthCheck.parseConfigForVisualEditor(healthCheck.config);
+      // Keep unsaved edits if the editor was already loaded; the user retries the action.
+      if (!healthCheck.editorLoaded) {
+        healthCheck.loadEditor();
       }
     };
 
-    // Count services by state
+    healthCheck.clearBearerToken = function() {
+      healthCheck.bearerToken = '';
+      api.setToken('');
+    };
+
+    // ---- State rendering ----
+
     healthCheck.countByState = function(stateType) {
       return healthCheck.services.filter(function(service) {
-        if (typeof service.state === 'string') {
-          return service.state === stateType;
-        } else if (typeof service.state === 'object' && service.state !== null) {
-          // Handle Rust enum format: { "Failure": "error message" } or "Success"
-          if (stateType === 'Failure') {
-            return service.state.Failure !== undefined;
-          }
-          return false;
-        }
-        return false;
+        return healthCheck.getStateClass(service.state) === stateType.toLowerCase();
       }).length;
     };
 
-    // Get state class for CSS
+    // State is "Unknown" | "Success" | {"Failure": "reason"}
     healthCheck.getStateClass = function(state) {
-      if (typeof state === 'string') {
-        return state.toLowerCase();
-      } else if (typeof state === 'object' && state !== null) {
-        if (state.Failure !== undefined) {
-          return 'failure';
-        }
+      if (state === 'Success') {
+        return 'success';
+      }
+      if (state && typeof state === 'object' && state.Failure !== undefined) {
+        return 'failure';
       }
       return 'unknown';
     };
 
-    // Get state label for display
     healthCheck.getStateLabel = function(state) {
       if (typeof state === 'string') {
         return state;
-      } else if (typeof state === 'object' && state !== null) {
-        if (state.Failure !== undefined) {
-          var msg = state.Failure;
-          return 'Failure' + (msg ? ': ' + msg : '');
-        }
+      }
+      if (state && typeof state === 'object' && state.Failure !== undefined) {
+        return 'Failure' + (state.Failure ? ': ' + state.Failure : '');
       }
       return 'Unknown';
     };
 
-    // Calculate uptime duration from start time
     healthCheck.getUptime = function(uptimeStart) {
       if (!uptimeStart) {
         return '-';
       }
 
-      var start = new Date(uptimeStart);
-      var now = new Date();
-      var diffMs = now - start;
-
+      var diffMs = new Date() - new Date(uptimeStart);
       if (diffMs < 0) {
         return '-';
       }
@@ -430,46 +371,28 @@ angular.module('healthCheckApp', [])
         return hours + 'h ' + minutes + 'm ' + seconds + 's';
       } else if (minutes > 0) {
         return minutes + 'm ' + seconds + 's';
-      } else {
-        return seconds + 's';
       }
+      return seconds + 's';
     };
 
-    // Watch auto-refresh toggle
-    healthCheck.$watch = function() {
-      return healthCheck.autoRefresh;
-    };
+    // ---- Auto-refresh ----
 
-    // Setup auto-refresh
-    function setupAutoRefresh() {
+    healthCheck.setupAutoRefresh = function() {
       if (refreshTimer) {
         $interval.cancel(refreshTimer);
+        refreshTimer = null;
       }
-
       if (healthCheck.autoRefresh) {
-        refreshTimer = $interval(function() {
-          healthCheck.loadServices();
-        }, REFRESH_INTERVAL);
+        refreshTimer = $interval(healthCheck.loadServices, REFRESH_INTERVAL);
       }
-    }
+    };
 
-    // Watch for auto-refresh changes
-    var watchAutoRefresh = $interval(function() {
-      setupAutoRefresh();
-    }, 100);
-
-    $timeout(function() {
-      $interval.cancel(watchAutoRefresh);
-    }, 500);
-
-    // Initial load
-    healthCheck.loadServices();
-    setupAutoRefresh();
-
-    // Cleanup on destroy
     healthCheck.$onDestroy = function() {
       if (refreshTimer) {
         $interval.cancel(refreshTimer);
       }
     };
+
+    healthCheck.loadServices();
+    healthCheck.setupAutoRefresh();
   }]);
